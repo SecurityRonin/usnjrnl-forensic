@@ -240,13 +240,26 @@ All formats include: timestamp, USN offset, MFT entry/sequence, parent entry/seq
 
 ## Architecture
 
-```
-$UsnJrnl:$J ──► USN Parser (V2/V3/V4) ──► Rewind Engine ──► Resolved Records ──► Output
-                                               ▲                    │
-$MFT ──────► MFT Parser ──────────────────────┘                    │
-                                                                    ▼
-$LogFile ──► LogFile Parser ──► USN Extractor ──► Correlation ──► TriForce Report
-                                                   Engine
+```mermaid
+graph LR
+    J["$UsnJrnl:$J"] --> USN["USN Parser<br/>V2 / V3 / V4"]
+    USN --> Rewind["Rewind Engine"]
+    MFT["$MFT"] --> MFTP["MFT Parser"]
+    MFTP --> Rewind
+    Rewind --> Resolved["Resolved Records"]
+    Resolved --> Output["Output<br/>CSV · JSONL · SQLite<br/>Body · TLN · XML"]
+    Resolved --> Rules["Rule Engine"]
+    Resolved --> Analysis["Analysis<br/>SDelete · Ransomware<br/>Timestomping"]
+
+    LF["$LogFile"] --> LFP["LogFile Parser"]
+    LFP --> Extract["USN Extractor"]
+    Extract --> Corr["Correlation Engine"]
+    Resolved --> Corr
+    MFTP --> Corr
+    Corr --> Report["TriForce Report<br/>Ghost Records · Timeline<br/>Journal Clearing"]
+
+    Mirror["$MFTMirr"] --> Integrity["MFTMirr<br/>Integrity Check"]
+    MFT --> Integrity
 ```
 
 Modules:

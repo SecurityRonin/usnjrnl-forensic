@@ -311,7 +311,7 @@ cargo test
 
 ## Author
 
-**Albert Hui** ([@SecurityRonin](https://github.com/SecurityRonin))
+**Albert Hui** ([@h4x0r](https://github.com/h4x0r), [@SecurityRonin](https://github.com/SecurityRonin))
 
 Digital forensics practitioner and tool developer. Building open-source DFIR tools that close the gaps left by commercial software.
 

@@ -140,13 +140,14 @@ After Rewind:   .\Users\admin\AppData\Local\Temp\malware.exe
 
 ### TriForce Correlation
 
-Three NTFS artifacts record overlapping file activity:
+Four NTFS artifacts record overlapping file activity:
 
 1. **$UsnJrnl** records file creates, deletes, renames, and data changes
 2. **$MFT** stores the current file system state with timestamps
 3. **$LogFile** contains transaction logs that embed USN records
+4. **$MFTMirr** mirrors the first critical MFT entries for integrity verification
 
-When an attacker clears the USN journal, the $LogFile still contains copies of recent USN records in its RCRD pages. `usnjrnl` extracts these embedded records, cross-references them against the journal, and flags the difference as "ghost records": proof of activity the attacker tried to erase.
+When an attacker clears the USN journal, the $LogFile still contains copies of recent USN records in its RCRD pages. `usnjrnl` extracts these embedded records, cross-references them against the journal, and flags the difference as "ghost records": proof of activity the attacker tried to erase. It also compares $MFT against $MFTMirr to detect tampering with critical system metadata entries ($MFT, $MFTMirr, $LogFile, $Volume) — a consistency check no other open-source tool performs.
 
 ```
 [+] 23 USN records recovered from $LogFile

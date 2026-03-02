@@ -1,0 +1,40 @@
+[package]
+name = "usnjrnl"
+version = "0.1.0"
+edition = "2021"
+description = "NTFS USN Journal parser with full path reconstruction via journal rewind"
+license = "MIT"
+repository = "https://github.com/SecurityRonin/usnjrnl"
+
+[[bin]]
+name = "usnjrnl"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# NTFS
+mft = "0.6"
+
+# Timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# Data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1"
+bitflags = "2"
+
+# Error handling
+anyhow = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# SQLite output
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -40,7 +40,7 @@ Parse a USN journal with full path reconstruction:
 # Basic: parse $UsnJrnl:$J with MFT correlation
 usnjrnl -j \$J -m \$MFT --csv output.csv
 
-# Full TriForce analysis: correlate all three artifacts + verify MFT integrity
+# Full QuadLink analysis: correlate all four artifacts
 usnjrnl -j \$J -m \$MFT --mftmirr \$MFTMirr --logfile \$LogFile --sqlite analysis.db
 
 # Detect timestomping
@@ -54,7 +54,7 @@ usnjrnl -j \$J -m \$MFT --csv out.csv --jsonl out.jsonl --sqlite out.db --body o
 
 Every USN journal parser on the market has blind spots. MFTECmd produces "UNKNOWN" parent paths when MFT entries get reused. ntfs-linker requires C++ compilation and has no maintained builds. NTFS Log Tracker runs only on Windows. No single tool combines all the techniques documented in academic research and DFIR blog posts.
 
-`usnjrnl` closes every gap. It implements the CyberCX Rewind algorithm for 100% path resolution, the ANJP TriForce approach for cross-artifact correlation, and adds forensic detection capabilities that no existing tool provides.
+`usnjrnl` closes every gap. It implements the CyberCX Rewind algorithm for 100% path resolution, four-artifact QuadLink correlation (extending David Cowen's TriForce with $MFTMirr integrity verification), and adds forensic detection capabilities that no existing tool provides.
 
 ## Feature Comparison
 
@@ -81,7 +81,7 @@ How `usnjrnl` compares against every notable USN journal tool, past and present.
 | Ghost record recovery | Yes | No | No | No | No | No | No |
 | $MFTMirr integrity check | Yes | No | No | No | No | No | No |
 
-> `usnjrnl` is the only tool that analyzes all four NTFS artifacts ($UsnJrnl + $MFT + $LogFile + $MFTMirr). The original TriForce technique (2013) correlates three. We extend it with $MFTMirr byte-level integrity verification to detect tampering with critical system metadata.
+> `usnjrnl` is the only tool that analyzes all four NTFS artifacts ($UsnJrnl + $MFT + $LogFile + $MFTMirr). We call this **QuadLink** correlation. It builds on David Cowen's TriForce (2013), which correlates three artifacts, and adds $MFTMirr byte-level integrity verification to detect tampering with critical system metadata.
 
 ### Forensic Detection
 
@@ -141,17 +141,16 @@ Before Rewind:  UNKNOWN\UNKNOWN\malware.exe
 After Rewind:   .\Users\admin\AppData\Local\Temp\malware.exe
 ```
 
-### TriForce Correlation + $MFTMirr Integrity
+### QuadLink Correlation
 
-The original [TriForce](https://www.hecfblog.com/2013/01/ntfs-triforce-deeper-look-inside.html) technique (David Cowen, 2013) correlates three NTFS artifacts:
+`usnjrnl` correlates four NTFS artifacts — more than any other tool:
 
 1. **$UsnJrnl** records file creates, deletes, renames, and data changes
 2. **$MFT** stores the current file system state with timestamps
 3. **$LogFile** contains transaction logs that embed USN records
+4. **$MFTMirr** mirrors the first four critical MFT entries for integrity verification
 
-`usnjrnl` implements the full TriForce correlation and extends it with a fourth artifact:
-
-4. **$MFTMirr** — Windows mirrors the first four MFT entries ($MFT, $MFTMirr, $LogFile, $Volume) to this backup file. `usnjrnl` performs byte-level comparison between $MFT and $MFTMirr, detecting tampering with critical system metadata that no other tool checks. This is not part of the original TriForce — it is an additional integrity verification unique to `usnjrnl`.
+This builds on the [TriForce](https://www.hecfblog.com/2013/01/ntfs-triforce-deeper-look-inside.html) technique (David Cowen, 2013), which pioneered three-artifact correlation of $MFT + $LogFile + $UsnJrnl. `usnjrnl` implements the full TriForce approach and adds $MFTMirr as a fourth artifact: a byte-level comparison between $MFT and its mirror that detects tampering with critical system metadata entries ($MFT, $MFTMirr, $LogFile, $Volume) — a consistency check no other tool performs.
 
 When an attacker clears the USN journal, the $LogFile still contains copies of recent USN records in its RCRD pages. `usnjrnl` extracts these embedded records, cross-references them against the journal, and flags the difference as "ghost records" — proof of activity the attacker tried to erase.
 
@@ -271,7 +270,7 @@ graph LR
     Extract --> Corr["Correlation Engine"]
     Resolved --> Corr
     MFTP --> Corr
-    Corr --> Report["TriForce Report<br/>Ghost Records · Timeline<br/>Journal Clearing"]
+    Corr --> Report["QuadLink Report<br/>Ghost Records · Timeline<br/>Journal Clearing"]
 
     Mirror["$MFTMirr"] --> Integrity["MFTMirr<br/>Integrity Check"]
     MFT --> Integrity
@@ -283,7 +282,7 @@ Modules:
 - `rewind`: CyberCX Rewind algorithm for path reconstruction
 - `logfile`: $LogFile RCRD page analysis and embedded USN extraction
 - `mftmirr`: $MFTMirr integrity verification
-- `correlation`: TriForce engine linking all three artifacts
+- `correlation`: QuadLink engine linking all four artifacts
 - `analysis`: Anti-forensics detection (secure delete, ransomware, timestomping, journal clearing)
 - `rules`: Pattern-matching rule engine with glob, regex, and reason flag conditions
 - `refs`: ReFS 128-bit file ID handling

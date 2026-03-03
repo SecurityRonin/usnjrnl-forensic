@@ -291,7 +291,7 @@ Modules:
 
 ## Testing
 
-271 unit tests covering every module. Run with:
+341 unit tests covering every module. Run with:
 
 ```bash
 cargo test

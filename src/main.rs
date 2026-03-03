@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use usnjrnl::mft::MftData;
-use usnjrnl::rewind::RewindEngine;
-use usnjrnl::usn;
+use usnjrnl_forensic::mft::MftData;
+use usnjrnl_forensic::rewind::RewindEngine;
+use usnjrnl_forensic::usn;
 
 #[derive(Parser)]
 #[command(
-    name = "usnjrnl",
+    name = "usnjrnl-forensic",
     about = "NTFS USN Journal parser with full path reconstruction via journal rewind",
     long_about = "Parses $UsnJrnl:$J with optional $MFT correlation to reconstruct full file paths.\n\
                   Implements the CyberCX 'Rewind' algorithm for complete path resolution even when\n\
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
         let mft_raw = std::fs::read(mft_path)?;
         let mirr_raw = std::fs::read(mirr_path)
             .with_context(|| format!("Failed to read $MFTMirr: {}", mirr_path.display()))?;
-        let comparison = usnjrnl::mftmirr::compare_mft_mirror(&mft_raw, &mirr_raw)?;
+        let comparison = usnjrnl_forensic::mftmirr::compare_mft_mirror(&mft_raw, &mirr_raw)?;
         if comparison.is_consistent {
             eprintln!("[+] $MFTMirr is consistent with $MFT");
         } else {
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
         eprintln!("[*] Analyzing $LogFile...");
         let log_raw = std::fs::read(logfile_path)
             .with_context(|| format!("Failed to read $LogFile: {}", logfile_path.display()))?;
-        let summary = usnjrnl::logfile::parse_logfile(&log_raw)?;
+        let summary = usnjrnl_forensic::logfile::parse_logfile(&log_raw)?;
         eprintln!(
             "[+] $LogFile: {} restart areas, {} record pages, highest LSN={}",
             summary.restart_areas.len(),
@@ -170,13 +170,13 @@ fn main() -> Result<()> {
         if summary.has_gaps {
             eprintln!("[!] GAPS DETECTED in $LogFile - possible journal clearing");
         }
-        if usnjrnl::logfile::detect_journal_clearing(&summary) {
+        if usnjrnl_forensic::logfile::detect_journal_clearing(&summary) {
             eprintln!("[!] Evidence of journal clearing detected");
         }
 
         // Extract embedded USN records from $LogFile RCRD pages
         eprintln!("[*] Extracting USN records embedded in $LogFile...");
-        let extracted = usnjrnl::logfile::usn_extractor::extract_usn_from_logfile(&log_raw);
+        let extracted = usnjrnl_forensic::logfile::usn_extractor::extract_usn_from_logfile(&log_raw);
         eprintln!("[+] {} USN records recovered from $LogFile", extracted.len());
         extracted
     } else {
@@ -213,7 +213,7 @@ fn main() -> Result<()> {
 
     if !logfile_usn_records.is_empty() || mft_data.is_some() {
         eprintln!("[*] Running TriForce correlation (MFT + LogFile + UsnJrnl)...");
-        let correlation = usnjrnl::correlation::CorrelationEngine::new();
+        let correlation = usnjrnl_forensic::correlation::CorrelationEngine::new();
         let mft_entries_slice = mft_data.as_ref().map(|m| m.entries.as_slice()).unwrap_or(&[]);
         let report = correlation.generate_report(&records, &logfile_usn_records, mft_entries_slice);
 
@@ -259,7 +259,7 @@ fn main() -> Result<()> {
         eprintln!("[*] Writing CSV to {}", csv_path.display());
         let file = std::fs::File::create(csv_path)?;
         let mut writer = BufWriter::new(file);
-        usnjrnl::output::csv_output::export_csv(&resolved, &mut writer)?;
+        usnjrnl_forensic::output::csv_output::export_csv(&resolved, &mut writer)?;
         eprintln!("[+] CSV export complete");
     }
 
@@ -267,14 +267,14 @@ fn main() -> Result<()> {
         eprintln!("[*] Writing JSON Lines to {}", jsonl_path.display());
         let file = std::fs::File::create(jsonl_path)?;
         let mut writer = BufWriter::new(file);
-        usnjrnl::output::json_output::export_jsonl(&resolved, &mut writer)?;
+        usnjrnl_forensic::output::json_output::export_jsonl(&resolved, &mut writer)?;
         eprintln!("[+] JSON Lines export complete");
     }
 
     if let Some(ref sqlite_path) = cli.sqlite {
         eprintln!("[*] Writing SQLite to {}", sqlite_path.display());
         let mft_entries = mft_data.as_ref().map(|m| m.entries.as_slice());
-        usnjrnl::output::sqlite_output::export_sqlite(sqlite_path, &resolved, mft_entries)?;
+        usnjrnl_forensic::output::sqlite_output::export_sqlite(sqlite_path, &resolved, mft_entries)?;
         eprintln!("[+] SQLite export complete");
     }
 
@@ -282,7 +282,7 @@ fn main() -> Result<()> {
         eprintln!("[*] Writing Sleuthkit body file to {}", body_path.display());
         let file = std::fs::File::create(body_path)?;
         let mut writer = BufWriter::new(file);
-        usnjrnl::output::body_output::export_body(&resolved, &mut writer)?;
+        usnjrnl_forensic::output::body_output::export_body(&resolved, &mut writer)?;
         eprintln!("[+] Body file export complete");
     }
 
@@ -290,7 +290,7 @@ fn main() -> Result<()> {
         eprintln!("[*] Writing TLN to {}", tln_path.display());
         let file = std::fs::File::create(tln_path)?;
         let mut writer = BufWriter::new(file);
-        usnjrnl::output::tln_output::export_tln(&resolved, &mut writer)?;
+        usnjrnl_forensic::output::tln_output::export_tln(&resolved, &mut writer)?;
         eprintln!("[+] TLN export complete");
     }
 
@@ -298,7 +298,7 @@ fn main() -> Result<()> {
         eprintln!("[*] Writing XML to {}", xml_path.display());
         let file = std::fs::File::create(xml_path)?;
         let mut writer = BufWriter::new(file);
-        usnjrnl::output::xml_output::export_xml(&resolved, &mut writer)?;
+        usnjrnl_forensic::output::xml_output::export_xml(&resolved, &mut writer)?;
         eprintln!("[+] XML export complete");
     }
 

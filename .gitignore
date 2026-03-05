@@ -1,3 +1,4 @@
 /target
 tarpaulin-report.json
 tests/data/
+.DS_Store

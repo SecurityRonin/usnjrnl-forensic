@@ -1,6 +1,6 @@
 [package]
 name = "usnjrnl-forensic"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "NTFS USN Journal parser with full path reconstruction via journal rewind"
 license = "MIT"

@@ -154,7 +154,7 @@ fn try_carve_v2(
     }
 
     // Filename length must be even (UTF-16) and non-zero
-    if filename_length == 0 || filename_length % 2 != 0 {
+    if filename_length == 0 || !filename_length.is_multiple_of(2) {
         stats.rejected_structure += 1;
         return None;
     }
@@ -210,7 +210,7 @@ fn try_carve_v3(
         return None;
     }
 
-    if filename_length == 0 || filename_length % 2 != 0 {
+    if filename_length == 0 || !filename_length.is_multiple_of(2) {
         stats.rejected_structure += 1;
         return None;
     }

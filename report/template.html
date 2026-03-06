@@ -1,8 +1,1176 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>usnjrnl-forensic Triage Report</title></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usnjrnl-forensic — Rapid Triage Report</title>
+<style>
+/* ── Reset & Base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+a { color: #58a6ff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { cursor: pointer; font-family: inherit; }
+input[type="text"] { font-family: inherit; }
+
+/* ── Scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* ── Layout ───────────────────────────────────────────────────── */
+.container { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
+
+/* ── Header ───────────────────────────────────────────────────── */
+.header { border-bottom: 1px solid #30363d; padding-bottom: 20px; margin-bottom: 20px; }
+.header-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.tool-name { font-size: 14px; color: #7d8590; font-weight: 400; letter-spacing: 0.5px; }
+.report-title { font-size: 22px; font-weight: 700; color: #e6edf3; letter-spacing: 1px; }
+.header-subtitle { color: #7d8590; font-size: 12px; margin-bottom: 16px; }
+.header-subtitle span { color: #58a6ff; }
+
+/* ── Stat Cards ───────────────────────────────────────────────── */
+.stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+.stat-card:hover { border-color: #484f58; }
+.stat-card .label { font-size: 11px; color: #7d8590; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+.stat-card .value { font-size: 28px; font-weight: 700; }
+.stat-card.blue .value { color: #58a6ff; }
+.stat-card.purple .value { color: #bc8cff; }
+.stat-card.cyan .value { color: #79c0ff; }
+.stat-card.red .value { color: #f85149; }
+.stat-card.green .value { color: #3fb950; }
+
+/* ── Tab Switcher ─────────────────────────────────────────────── */
+.tab-switcher { display: flex; gap: 4px; margin-bottom: 20px; }
+.tab-btn {
+  background: #161b22;
+  color: #7d8590;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 24px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.tab-btn:hover { color: #e6edf3; border-color: #484f58; }
+.tab-btn.active { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
+
+/* ── Story Tab ────────────────────────────────────────────────── */
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.category-group { margin-bottom: 24px; }
+.category-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #7d8590;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #21262d;
+}
+
+.triage-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left: 3px solid #30363d;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.triage-card:hover { border-color: #484f58; }
+.triage-card.threat { border-left-color: #f85149; }
+.triage-card.carved { border-left-color: #bc8cff; }
+.triage-card.info { border-left-color: #58a6ff; }
+.triage-card.empty { border-left-color: #30363d; opacity: 0.6; }
+
+.triage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.triage-header:hover { background: #1c2129; }
+.triage-question { flex: 1; font-size: 13px; color: #e6edf3; }
+.triage-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.triage-badge.yes { background: rgba(248,81,73,0.15); color: #f85149; }
+.triage-badge.no { background: rgba(63,185,80,0.15); color: #3fb950; }
+.triage-badge.info-badge { background: rgba(88,166,255,0.15); color: #58a6ff; }
+.triage-hit-count {
+  font-size: 11px;
+  color: #7d8590;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+.triage-chevron {
+  color: #7d8590;
+  margin-left: 10px;
+  transition: transform 0.2s;
+  font-size: 12px;
+}
+.triage-card.expanded .triage-chevron { transform: rotate(90deg); }
+
+.triage-body {
+  display: none;
+  padding: 0 16px 16px 16px;
+  border-top: 1px solid #21262d;
+}
+.triage-card.expanded .triage-body { display: block; }
+
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.evidence-table th {
+  text-align: left;
+  color: #7d8590;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid #30363d;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.evidence-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #21262d;
+  color: #e6edf3;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evidence-table tr:hover td { background: #1c2129; }
+
+.view-explore-btn {
+  display: inline-block;
+  margin-top: 10px;
+  background: rgba(88,166,255,0.1);
+  color: #58a6ff;
+  border: 1px solid rgba(88,166,255,0.3);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.view-explore-btn:hover { background: rgba(88,166,255,0.2); border-color: #58a6ff; }
+
+/* ── Explore Tab ──────────────────────────────────────────────── */
+.explore-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; }
+
+/* Sidebar */
+.explore-sidebar {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  position: sticky;
+  top: 20px;
+}
+.sidebar-section { margin-bottom: 16px; }
+.sidebar-label {
+  font-size: 11px;
+  color: #7d8590;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.search-input {
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #e6edf3;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.search-input:focus { border-color: #58a6ff; }
+.search-input::placeholder { color: #484f58; }
+
+.checkbox-group { display: flex; flex-direction: column; gap: 4px; }
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: #e6edf3;
+  cursor: pointer;
+}
+.checkbox-item input[type="checkbox"] {
+  accent-color: #58a6ff;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+.checkbox-item .count { color: #7d8590; font-size: 11px; margin-left: auto; }
+
+/* Main panel */
+.explore-main { min-width: 0; }
+
+/* Sparkline */
+.sparkline-container {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.sparkline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.sparkline-title { font-size: 11px; color: #7d8590; text-transform: uppercase; letter-spacing: 0.8px; }
+.sparkline-reset {
+  background: none;
+  border: 1px solid #30363d;
+  color: #7d8590;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  display: none;
+}
+.sparkline-reset:hover { color: #e6edf3; border-color: #484f58; }
+.sparkline-reset.visible { display: inline-block; }
+#sparkline {
+  width: 100%;
+  height: 80px;
+  cursor: crosshair;
+  display: block;
+  border-radius: 4px;
+}
+
+/* Data table */
+.table-container {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.table-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #30363d;
+  font-size: 12px;
+  color: #7d8590;
+}
+.table-scroll { overflow-x: auto; }
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.data-table th {
+  text-align: left;
+  color: #7d8590;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid #30363d;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: sticky;
+  top: 0;
+  background: #161b22;
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid #21262d;
+  color: #e6edf3;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.data-table tr { cursor: pointer; transition: background 0.1s; }
+.data-table tr:hover td { background: #1c2129; }
+.data-table tr.selected td { background: rgba(88,166,255,0.08); }
+
+/* Source pills */
+.source-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.source-pill.allocated { background: rgba(88,166,255,0.15); color: #58a6ff; }
+.source-pill.carved { background: rgba(188,140,255,0.15); color: #bc8cff; }
+.source-pill.ghost { background: rgba(121,192,255,0.15); color: #79c0ff; }
+
+/* Reason tags */
+.reason-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 1px 2px;
+  background: rgba(88,166,255,0.08);
+  color: #79c0ff;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #30363d;
+}
+.page-btn {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+.page-btn:hover:not(:disabled) { background: #30363d; }
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-info { color: #7d8590; font-size: 12px; }
+
+/* Detail Panel */
+.detail-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  display: none;
+}
+.detail-panel.visible { display: block; }
+.detail-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.detail-panel-title { font-size: 14px; font-weight: 700; color: #e6edf3; }
+.detail-close-btn {
+  background: none;
+  border: none;
+  color: #7d8590;
+  font-size: 18px;
+  padding: 0 4px;
+}
+.detail-close-btn:hover { color: #e6edf3; }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.detail-field {}
+.detail-field .df-label { font-size: 10px; color: #7d8590; text-transform: uppercase; letter-spacing: 0.5px; }
+.detail-field .df-value { font-size: 13px; color: #e6edf3; word-break: break-all; }
+.detection-badges { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.detection-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.detection-badge.timestomping { background: rgba(248,81,73,0.15); color: #f85149; }
+.detection-badge.secure-deletion { background: rgba(210,153,34,0.15); color: #d29922; }
+.detection-badge.ransomware { background: rgba(248,81,73,0.2); color: #f85149; }
+
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .stat-cards { grid-template-columns: repeat(2, 1fr); }
+  .explore-layout { grid-template-columns: 1fr; }
+  .explore-sidebar { position: static; max-height: none; }
+}
+@media (max-width: 600px) {
+  .stat-cards { grid-template-columns: 1fr; }
+  .container { padding: 12px; }
+}
+</style>
+</head>
 <body>
-<script>const DATA = {{DATA}};</script>
-<div id="app">Loading...</div>
+
+<div class="container" id="app">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <span class="tool-name">usnjrnl-forensic</span>
+      <span class="report-title">RAPID TRIAGE REPORT</span>
+    </div>
+    <div class="header-subtitle" id="header-subtitle"></div>
+  </div>
+
+  <!-- Stat Cards -->
+  <div class="stat-cards" id="stat-cards"></div>
+
+  <!-- Tab Switcher -->
+  <div class="tab-switcher">
+    <button class="tab-btn active" data-tab="story">Story</button>
+    <button class="tab-btn" data-tab="explore">Explore</button>
+  </div>
+
+  <!-- Story Tab -->
+  <div class="tab-content active" id="tab-story"></div>
+
+  <!-- Explore Tab -->
+  <div class="tab-content" id="tab-explore">
+    <div class="explore-layout">
+      <div class="explore-sidebar" id="explore-sidebar"></div>
+      <div class="explore-main">
+        <div class="sparkline-container">
+          <div class="sparkline-header">
+            <span class="sparkline-title">Activity Timeline</span>
+            <button class="sparkline-reset" id="sparkline-reset">Reset Zoom</button>
+          </div>
+          <canvas id="sparkline"></canvas>
+        </div>
+        <div class="table-container">
+          <div class="table-info">
+            <span id="table-info-text">Loading...</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Source</th>
+                  <th>Filename</th>
+                  <th>Full Path</th>
+                  <th>Reasons</th>
+                  <th>MFT Entry</th>
+                </tr>
+              </thead>
+              <tbody id="data-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+        <div class="detail-panel" id="detail-panel"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {{DATA}};
+
+/* ── Utilities ────────────────────────────────────────────────── */
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtNum(n) {
+  return (n || 0).toLocaleString();
+}
+function fmtTimestamp(ts) {
+  if (!ts) return '—';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return esc(ts);
+  return d.toISOString().replace('T', ' ').replace(/\.000Z$/, 'Z').slice(0, 23);
+}
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  var units = ['B','KB','MB','GB','TB'];
+  var i = 0;
+  var v = b;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return v.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+/* ── State ────────────────────────────────────────────────────── */
+var state = {
+  activeTab: 'story',
+  searchText: '',
+  reasonFilters: [],
+  sourceFilters: { allocated: true, carved: true, ghost: true },
+  timeZoom: null,
+  filteredRecords: [],
+  filteredIndices: null,
+  page: 0,
+  pageSize: 500,
+  selectedRow: -1
+};
+
+/* ── Build all records with indices & normalize ──────────────── */
+var allRecords = (DATA.records || []).map(function(r, i) {
+  r._index = i;
+  r._ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
+  if (!r.source) r.source = 'allocated';
+  return r;
+});
+
+/* ── Populate ghost records ──────────────────────────────────── */
+if (DATA.ghost_records && DATA.ghost_records.length) {
+  DATA.ghost_records.forEach(function(g) {
+    var exists = allRecords.some(function(r) { return r.usn === g.usn && r.timestamp === g.timestamp; });
+    if (!exists) {
+      g.source = 'ghost';
+      g._index = allRecords.length;
+      g._ts = g.timestamp ? new Date(g.timestamp).getTime() : 0;
+      if (!g.full_path) g.full_path = g.filename || '';
+      if (!g.reasons) g.reasons = [];
+      allRecords.push(g);
+    }
+  });
+}
+
+/* ── Collect unique reasons ──────────────────────────────────── */
+var reasonCounts = {};
+allRecords.forEach(function(r) {
+  (r.reasons || []).forEach(function(reason) {
+    reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+  });
+});
+var topReasons = Object.keys(reasonCounts).sort(function(a, b) { return reasonCounts[b] - reasonCounts[a]; }).slice(0, 20);
+
+/* ── Detection lookup by MFT entry ───────────────────────────── */
+var detectionMap = {};
+if (DATA.detections) {
+  ['timestomping', 'secure_deletion', 'ransomware'].forEach(function(type) {
+    (DATA.detections[type] || []).forEach(function(d) {
+      if (d.mft_entry != null) {
+        if (!detectionMap[d.mft_entry]) detectionMap[d.mft_entry] = [];
+        detectionMap[d.mft_entry].push({ type: type, detail: d.detail, confidence: d.confidence, filename: d.filename });
+      }
+    });
+  });
+}
+
+/* ── MFT timestamp lookup ────────────────────────────────────── */
+var mftTimestampMap = {};
+if (DATA.mft_timestamps && DATA.mft_timestamps.length) {
+  DATA.mft_timestamps.forEach(function(m) {
+    if (m.mft_entry != null) mftTimestampMap[m.mft_entry] = m;
+  });
+}
+
+/* ── Render Header ────────────────────────────────────────────── */
+function renderHeader() {
+  var m = DATA.meta || {};
+  var sub = '';
+  if (m.image_name) sub += 'Image: <span>' + esc(m.image_name) + '</span>';
+  if (m.time_range) {
+    if (sub) sub += ' &nbsp;|&nbsp; ';
+    sub += 'Range: <span>' + esc(fmtTimestamp(m.time_range.start)) + '</span> to <span>' + esc(fmtTimestamp(m.time_range.end)) + '</span>';
+  }
+  if (m.generated_at) {
+    if (sub) sub += ' &nbsp;|&nbsp; ';
+    sub += 'Generated: <span>' + esc(fmtTimestamp(m.generated_at)) + '</span>';
+  }
+  if (m.tool_version) {
+    if (sub) sub += ' &nbsp;|&nbsp; ';
+    sub += 'v<span>' + esc(m.tool_version) + '</span>';
+  }
+  document.getElementById('header-subtitle').innerHTML = sub;
+}
+
+/* ── Render Stat Cards ────────────────────────────────────────── */
+function renderStatCards() {
+  var m = DATA.meta || {};
+  var totalRecords = m.record_count || allRecords.length;
+  var carvedRecords = (m.carved_usn_count || 0) + (m.carved_mft_count || 0);
+  var ghostRecords = m.ghost_record_count || 0;
+  var alerts = m.alert_count || 0;
+  var alertClass = alerts > 0 ? 'red' : 'green';
+
+  document.getElementById('stat-cards').innerHTML =
+    '<div class="stat-card blue"><div class="label">Total Records</div><div class="value">' + fmtNum(totalRecords) + '</div></div>' +
+    '<div class="stat-card purple"><div class="label">Carved Records</div><div class="value">' + fmtNum(carvedRecords) + '</div></div>' +
+    '<div class="stat-card cyan"><div class="label">Ghost Records</div><div class="value">' + fmtNum(ghostRecords) + '</div></div>' +
+    '<div class="stat-card ' + alertClass + '"><div class="label">Alerts</div><div class="value">' + fmtNum(alerts) + '</div></div>';
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────── */
+function switchTab(tab) {
+  state.activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'explore') {
+    applyFilters();
+    resizeSparkline();
+    drawSparkline();
+  }
+}
+
+document.querySelectorAll('.tab-btn').forEach(function(b) {
+  b.addEventListener('click', function() { switchTab(this.getAttribute('data-tab')); });
+});
+
+/* ── Story Tab ────────────────────────────────────────────────── */
+function renderStory() {
+  var triageItems = DATA.triage || [];
+  if (triageItems.length === 0) {
+    document.getElementById('tab-story').innerHTML = '<div style="color:#7d8590;padding:40px;text-align:center;">No triage questions configured.</div>';
+    return;
+  }
+
+  var grouped = {};
+  var categoryOrder = [];
+  triageItems.forEach(function(t) {
+    var cat = t.category || 'General';
+    if (!grouped[cat]) { grouped[cat] = []; categoryOrder.push(cat); }
+    grouped[cat].push(t);
+  });
+
+  var html = '';
+  categoryOrder.forEach(function(cat) {
+    html += '<div class="category-group">';
+    html += '<div class="category-title">' + esc(cat) + '</div>';
+    grouped[cat].forEach(function(t, idx) {
+      var hasHits = t.has_hits && t.hit_count > 0;
+      var cardClass = 'triage-card';
+      if (!hasHits) {
+        cardClass += ' empty';
+      } else {
+        var catLower = (t.category || '').toLowerCase();
+        if (catLower.indexOf('breach') >= 0 || catLower.indexOf('malware') >= 0 || catLower.indexOf('threat') >= 0 || catLower.indexOf('ransom') >= 0 || catLower.indexOf('delet') >= 0 || catLower.indexOf('destruct') >= 0) {
+          cardClass += ' threat';
+        } else if (catLower.indexOf('carv') >= 0 || catLower.indexOf('recover') >= 0) {
+          cardClass += ' carved';
+        } else {
+          cardClass += ' info';
+        }
+      }
+
+      var badgeClass, badgeText;
+      if (hasHits) {
+        badgeClass = 'triage-badge yes';
+        badgeText = 'YES';
+      } else {
+        badgeClass = 'triage-badge no';
+        badgeText = 'NO';
+      }
+
+      var cardId = 'triage-' + esc(t.id || (cat + '-' + idx));
+      html += '<div class="' + cardClass + '" id="' + cardId + '">';
+      html += '<div class="triage-header" onclick="toggleTriageCard(\'' + cardId + '\')">';
+      html += '<span class="triage-question">' + esc(t.question) + '</span>';
+      html += '<span class="' + badgeClass + '">' + badgeText + '</span>';
+      if (hasHits) html += '<span class="triage-hit-count">' + fmtNum(t.hit_count) + ' hits</span>';
+      html += '<span class="triage-chevron">&#9654;</span>';
+      html += '</div>';
+
+      html += '<div class="triage-body">';
+      if (hasHits && t.record_indices && t.record_indices.length > 0) {
+        var indices = t.record_indices.slice(0, 5);
+        html += '<table class="evidence-table"><thead><tr><th>Timestamp</th><th>Source</th><th>Filename</th><th>Path</th><th>Reasons</th></tr></thead><tbody>';
+        indices.forEach(function(ri) {
+          var rec = allRecords[ri];
+          if (!rec) return;
+          html += '<tr>';
+          html += '<td>' + esc(fmtTimestamp(rec.timestamp)) + '</td>';
+          html += '<td><span class="source-pill ' + esc(rec.source) + '">' + esc(rec.source) + '</span></td>';
+          html += '<td>' + esc(rec.filename) + '</td>';
+          html += '<td>' + esc(rec.full_path) + '</td>';
+          html += '<td>' + (rec.reasons || []).map(function(r) { return '<span class="reason-tag">' + esc(r) + '</span>'; }).join('') + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        if (t.record_indices.length > 5) {
+          html += '<div style="color:#7d8590;font-size:11px;margin-top:6px;">Showing 5 of ' + fmtNum(t.hit_count) + ' matching records</div>';
+        }
+        html += '<button class="view-explore-btn" onclick="viewInExplore(' + JSON.stringify(t.record_indices) + ')">View in Explore &rarr;</button>';
+      } else {
+        html += '<div style="color:#7d8590;font-size:12px;padding:8px 0;">No matching records found.</div>';
+      }
+      html += '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+
+  document.getElementById('tab-story').innerHTML = html;
+}
+
+function toggleTriageCard(id) {
+  var card = document.getElementById(id);
+  if (card) card.classList.toggle('expanded');
+}
+
+function viewInExplore(indices) {
+  state.filteredIndices = new Set(indices);
+  state.searchText = '';
+  state.reasonFilters = [];
+  state.timeZoom = null;
+  state.page = 0;
+  state.selectedRow = -1;
+  switchTab('explore');
+  var searchInput = document.getElementById('search-input');
+  if (searchInput) searchInput.value = '';
+  document.querySelectorAll('.reason-cb').forEach(function(cb) { cb.checked = false; });
+  document.querySelectorAll('.source-cb').forEach(function(cb) { cb.checked = true; });
+  state.sourceFilters = { allocated: true, carved: true, ghost: true };
+  applyFilters();
+  drawSparkline();
+  renderTable();
+}
+
+/* ── Explore Sidebar ──────────────────────────────────────────── */
+function renderSidebar() {
+  var html = '';
+
+  /* Search */
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">Search</div>';
+  html += '<input type="text" class="search-input" id="search-input" placeholder="Filter filename / path...">';
+  html += '</div>';
+
+  /* Reasons */
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">Reason Flags</div>';
+  html += '<div class="checkbox-group" id="reason-checkboxes">';
+  topReasons.forEach(function(reason) {
+    html += '<label class="checkbox-item"><input type="checkbox" class="reason-cb" value="' + esc(reason) + '"> ' + esc(reason) + '<span class="count">' + fmtNum(reasonCounts[reason]) + '</span></label>';
+  });
+  html += '</div>';
+  html += '</div>';
+
+  /* Source */
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">Source</div>';
+  html += '<div class="checkbox-group">';
+  html += '<label class="checkbox-item"><input type="checkbox" class="source-cb" value="allocated" checked> <span class="source-pill allocated">Allocated</span></label>';
+  html += '<label class="checkbox-item"><input type="checkbox" class="source-cb" value="carved" checked> <span class="source-pill carved">Carved</span></label>';
+  html += '<label class="checkbox-item"><input type="checkbox" class="source-cb" value="ghost" checked> <span class="source-pill ghost">Ghost</span></label>';
+  html += '</div>';
+  html += '</div>';
+
+  /* Carving stats */
+  if (DATA.carving_stats) {
+    var cs = DATA.carving_stats;
+    html += '<div class="sidebar-section">';
+    html += '<div class="sidebar-label">Carving Stats</div>';
+    html += '<div style="font-size:11px;color:#7d8590;line-height:1.8;">';
+    html += 'Scanned: ' + fmtBytes(cs.bytes_scanned) + '<br>';
+    html += 'Chunks: ' + fmtNum(cs.chunks_processed) + '<br>';
+    html += 'USN carved: ' + fmtNum(cs.usn_carved) + '<br>';
+    html += 'MFT carved: ' + fmtNum(cs.mft_carved) + '<br>';
+    html += 'USN dupes: ' + fmtNum(cs.usn_dupes_removed) + '<br>';
+    html += 'MFT dupes: ' + fmtNum(cs.mft_dupes_removed);
+    html += '</div>';
+    html += '</div>';
+  }
+
+  document.getElementById('explore-sidebar').innerHTML = html;
+
+  /* Event listeners */
+  var searchInput = document.getElementById('search-input');
+  var debounceTimer = null;
+  searchInput.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function() {
+      state.searchText = searchInput.value.trim().toLowerCase();
+      state.filteredIndices = null;
+      state.page = 0;
+      applyFilters();
+      drawSparkline();
+      renderTable();
+    }, 200);
+  });
+
+  document.querySelectorAll('.reason-cb').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      state.reasonFilters = [];
+      document.querySelectorAll('.reason-cb:checked').forEach(function(c) { state.reasonFilters.push(c.value); });
+      state.filteredIndices = null;
+      state.page = 0;
+      applyFilters();
+      drawSparkline();
+      renderTable();
+    });
+  });
+
+  document.querySelectorAll('.source-cb').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      state.sourceFilters[cb.value] = cb.checked;
+      state.filteredIndices = null;
+      state.page = 0;
+      applyFilters();
+      drawSparkline();
+      renderTable();
+    });
+  });
+}
+
+/* ── Filtering ────────────────────────────────────────────────── */
+function applyFilters() {
+  state.filteredRecords = allRecords.filter(function(r) {
+    /* Index filter from Story "View in Explore" */
+    if (state.filteredIndices && !state.filteredIndices.has(r._index)) return false;
+
+    /* Source filter */
+    if (!state.sourceFilters[r.source]) return false;
+
+    /* Text search */
+    if (state.searchText) {
+      var hay = ((r.filename || '') + ' ' + (r.full_path || '')).toLowerCase();
+      if (hay.indexOf(state.searchText) < 0) return false;
+    }
+
+    /* Reason filter */
+    if (state.reasonFilters.length > 0) {
+      var reasons = r.reasons || [];
+      var match = state.reasonFilters.some(function(rf) { return reasons.indexOf(rf) >= 0; });
+      if (!match) return false;
+    }
+
+    /* Time zoom */
+    if (state.timeZoom) {
+      if (r._ts < state.timeZoom.start || r._ts > state.timeZoom.end) return false;
+    }
+
+    return true;
+  });
+}
+
+/* ── Sparkline ────────────────────────────────────────────────── */
+var sparklineBuckets = [];
+var sparklineBucketWidth = 0;
+var sparklineMinTs = 0;
+var sparklineMaxTs = 0;
+
+function resizeSparkline() {
+  var canvas = document.getElementById('sparkline');
+  if (!canvas) return;
+  var container = canvas.parentElement;
+  canvas.width = container.clientWidth - 24;
+  canvas.height = 80;
+}
+
+function drawSparkline() {
+  var canvas = document.getElementById('sparkline');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width;
+  var h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  var records = state.filteredRecords;
+  if (records.length === 0) {
+    ctx.fillStyle = '#7d8590';
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data in current filter', w / 2, h / 2);
+    sparklineBuckets = [];
+    return;
+  }
+
+  /* Compute time range */
+  var timestamps = records.filter(function(r) { return r._ts > 0; }).map(function(r) { return r._ts; });
+  if (timestamps.length === 0) {
+    sparklineBuckets = [];
+    return;
+  }
+  var minTs = Math.min.apply(null, timestamps);
+  var maxTs = Math.max.apply(null, timestamps);
+  sparklineMinTs = minTs;
+  sparklineMaxTs = maxTs;
+
+  if (minTs === maxTs) { maxTs = minTs + 60000; }
+
+  /* Bucket into N bins */
+  var numBuckets = Math.min(Math.max(Math.floor(w / 4), 50), 300);
+  var bucketDuration = (maxTs - minTs) / numBuckets;
+  sparklineBucketWidth = bucketDuration;
+  var buckets = new Array(numBuckets).fill(0);
+
+  timestamps.forEach(function(ts) {
+    var idx = Math.floor((ts - minTs) / bucketDuration);
+    if (idx >= numBuckets) idx = numBuckets - 1;
+    if (idx < 0) idx = 0;
+    buckets[idx]++;
+  });
+
+  sparklineBuckets = buckets;
+  var maxCount = Math.max.apply(null, buckets);
+  if (maxCount === 0) maxCount = 1;
+
+  var barW = w / numBuckets;
+  var padding = 4;
+
+  for (var i = 0; i < numBuckets; i++) {
+    var barH = (buckets[i] / maxCount) * (h - padding * 2);
+    if (buckets[i] > 0 && barH < 2) barH = 2;
+    var x = i * barW;
+    var y = h - padding - barH;
+
+    ctx.fillStyle = '#58a6ff';
+    if (buckets[i] > maxCount * 0.8) ctx.fillStyle = '#f85149';
+    else if (buckets[i] > maxCount * 0.5) ctx.fillStyle = '#d29922';
+
+    ctx.fillRect(x + 0.5, y, barW - 1, barH);
+  }
+
+  /* Time labels */
+  ctx.fillStyle = '#7d8590';
+  ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(fmtTimestamp(new Date(minTs).toISOString()), 2, 10);
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtTimestamp(new Date(maxTs).toISOString()), w - 2, 10);
+}
+
+/* Sparkline click → zoom */
+document.getElementById('sparkline').addEventListener('click', function(e) {
+  if (sparklineBuckets.length === 0) return;
+  var canvas = this;
+  var rect = canvas.getBoundingClientRect();
+  var x = e.clientX - rect.left;
+  var bucketIdx = Math.floor(x / (canvas.width / sparklineBuckets.length));
+  if (bucketIdx < 0) bucketIdx = 0;
+  if (bucketIdx >= sparklineBuckets.length) bucketIdx = sparklineBuckets.length - 1;
+
+  var bucketStart = sparklineMinTs + bucketIdx * sparklineBucketWidth;
+  var zoomPadding = sparklineBucketWidth * 5;
+  state.timeZoom = {
+    start: bucketStart - zoomPadding,
+    end: bucketStart + sparklineBucketWidth + zoomPadding
+  };
+  state.page = 0;
+  document.getElementById('sparkline-reset').classList.add('visible');
+  applyFilters();
+  drawSparkline();
+  renderTable();
+});
+
+document.getElementById('sparkline-reset').addEventListener('click', function() {
+  state.timeZoom = null;
+  state.page = 0;
+  this.classList.remove('visible');
+  applyFilters();
+  drawSparkline();
+  renderTable();
+});
+
+window.addEventListener('resize', function() {
+  if (state.activeTab === 'explore') {
+    resizeSparkline();
+    drawSparkline();
+  }
+});
+
+/* ── Data Table ───────────────────────────────────────────────── */
+function renderTable() {
+  var records = state.filteredRecords;
+  var totalPages = Math.max(1, Math.ceil(records.length / state.pageSize));
+  if (state.page >= totalPages) state.page = totalPages - 1;
+  if (state.page < 0) state.page = 0;
+
+  var start = state.page * state.pageSize;
+  var end = Math.min(start + state.pageSize, records.length);
+  var pageRecords = records.slice(start, end);
+
+  /* Info */
+  document.getElementById('table-info-text').textContent =
+    fmtNum(records.length) + ' records' + (state.filteredIndices ? ' (filtered from Story)' : '') +
+    (records.length > state.pageSize ? ' — showing ' + fmtNum(start + 1) + '–' + fmtNum(end) : '');
+
+  /* Rows */
+  var tbody = document.getElementById('data-tbody');
+  var html = '';
+  pageRecords.forEach(function(r, i) {
+    var rowIdx = start + i;
+    html += '<tr data-row="' + rowIdx + '"' + (state.selectedRow === rowIdx ? ' class="selected"' : '') + '>';
+    html += '<td>' + esc(fmtTimestamp(r.timestamp)) + '</td>';
+    html += '<td><span class="source-pill ' + esc(r.source) + '">' + esc(r.source) + '</span></td>';
+    html += '<td>' + esc(r.filename) + '</td>';
+    html += '<td title="' + esc(r.full_path) + '">' + esc(r.full_path) + '</td>';
+    html += '<td>' + (r.reasons || []).map(function(reason) { return '<span class="reason-tag">' + esc(reason) + '</span>'; }).join('') + '</td>';
+    html += '<td>' + (r.mft_entry != null ? esc(r.mft_entry) : '—') + '</td>';
+    html += '</tr>';
+  });
+  tbody.innerHTML = html;
+
+  /* Row click */
+  tbody.querySelectorAll('tr').forEach(function(tr) {
+    tr.addEventListener('click', function() {
+      var rowIdx = parseInt(this.getAttribute('data-row'));
+      state.selectedRow = rowIdx;
+      tbody.querySelectorAll('tr').forEach(function(r) { r.classList.remove('selected'); });
+      this.classList.add('selected');
+      showDetail(state.filteredRecords[rowIdx]);
+    });
+  });
+
+  /* Pagination */
+  var pagHtml = '';
+  pagHtml += '<button class="page-btn" id="page-prev"' + (state.page === 0 ? ' disabled' : '') + '>&laquo; Prev</button>';
+  pagHtml += '<span class="page-info">Page ' + (state.page + 1) + ' of ' + totalPages + '</span>';
+  pagHtml += '<button class="page-btn" id="page-next"' + (state.page >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>';
+  document.getElementById('pagination').innerHTML = pagHtml;
+
+  document.getElementById('page-prev').addEventListener('click', function() {
+    if (state.page > 0) { state.page--; renderTable(); }
+  });
+  document.getElementById('page-next').addEventListener('click', function() {
+    var totalPages = Math.ceil(state.filteredRecords.length / state.pageSize);
+    if (state.page < totalPages - 1) { state.page++; renderTable(); }
+  });
+}
+
+/* ── Detail Panel ─────────────────────────────────────────────── */
+function showDetail(record) {
+  if (!record) return;
+  var panel = document.getElementById('detail-panel');
+  var html = '';
+
+  html += '<div class="detail-panel-header">';
+  html += '<div class="detail-panel-title">' + esc(record.filename || 'Record Detail') + '</div>';
+  html += '<button class="detail-close-btn" onclick="closeDetail()">&times;</button>';
+  html += '</div>';
+
+  html += '<div class="detail-grid">';
+  var fields = [
+    ['Timestamp', fmtTimestamp(record.timestamp)],
+    ['USN', record.usn],
+    ['MFT Entry', record.mft_entry],
+    ['MFT Sequence', record.mft_sequence],
+    ['Parent Entry', record.parent_entry],
+    ['Parent Sequence', record.parent_sequence],
+    ['Filename', record.filename],
+    ['Extension', record.extension],
+    ['Full Path', record.full_path],
+    ['Parent Path', record.parent_path],
+    ['Source', record.source],
+    ['File Attributes', record.file_attributes],
+    ['Reasons', (record.reasons || []).join(', ')],
+    ['LSN', record.lsn]
+  ];
+  fields.forEach(function(f) {
+    if (f[1] == null || f[1] === '' || f[1] === undefined) return;
+    html += '<div class="detail-field"><div class="df-label">' + esc(f[0]) + '</div><div class="df-value">' + esc(f[1]) + '</div></div>';
+  });
+  html += '</div>';
+
+  /* MFT timestamps */
+  var mftTs = mftTimestampMap[record.mft_entry];
+  if (mftTs) {
+    html += '<div style="margin-top:14px;">';
+    html += '<div class="sidebar-label" style="margin-bottom:6px;">MFT Timestamps ($SI)</div>';
+    html += '<div class="detail-grid">';
+    var tsFields = ['created', 'modified', 'mft_modified', 'accessed'];
+    tsFields.forEach(function(tf) {
+      if (mftTs[tf]) {
+        html += '<div class="detail-field"><div class="df-label">' + esc(tf) + '</div><div class="df-value">' + esc(fmtTimestamp(mftTs[tf])) + '</div></div>';
+      }
+    });
+    html += '</div>';
+
+    if (mftTs.fn_created || mftTs.fn_modified) {
+      html += '<div class="sidebar-label" style="margin-top:10px;margin-bottom:6px;">MFT Timestamps ($FN)</div>';
+      html += '<div class="detail-grid">';
+      var fnFields = ['fn_created', 'fn_modified', 'fn_mft_modified', 'fn_accessed'];
+      fnFields.forEach(function(tf) {
+        if (mftTs[tf]) {
+          html += '<div class="detail-field"><div class="df-label">' + esc(tf.replace('fn_', '')) + '</div><div class="df-value">' + esc(fmtTimestamp(mftTs[tf])) + '</div></div>';
+        }
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  /* Detection badges */
+  var detections = detectionMap[record.mft_entry];
+  if (detections && detections.length > 0) {
+    html += '<div class="detection-badges">';
+    detections.forEach(function(d) {
+      var cls = 'detection-badge';
+      if (d.type === 'timestomping') cls += ' timestomping';
+      else if (d.type === 'secure_deletion') cls += ' secure-deletion';
+      else if (d.type === 'ransomware') cls += ' ransomware';
+      var label = d.type.replace(/_/g, ' ');
+      if (d.confidence != null) label += ' (' + Math.round(d.confidence * 100) + '%)';
+      html += '<span class="' + cls + '" title="' + esc(d.detail || '') + '">' + esc(label) + '</span>';
+    });
+    html += '</div>';
+  }
+
+  /* Journal clearing notice */
+  if (DATA.detections && DATA.detections.journal_clearing && DATA.detections.journal_clearing.detected) {
+    html += '<div class="detection-badges" style="margin-top:8px;">';
+    html += '<span class="detection-badge timestomping">Journal Clearing Detected (' + Math.round(DATA.detections.journal_clearing.confidence * 100) + '%)</span>';
+    html += '</div>';
+  }
+
+  panel.innerHTML = html;
+  panel.classList.add('visible');
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('visible');
+  state.selectedRow = -1;
+  document.querySelectorAll('.data-table tr.selected').forEach(function(r) { r.classList.remove('selected'); });
+}
+
+/* ── Initialize ───────────────────────────────────────────────── */
+function init() {
+  renderHeader();
+  renderStatCards();
+  renderStory();
+  renderSidebar();
+  applyFilters();
+
+  /* Delay sparkline render to ensure canvas is sized */
+  setTimeout(function() {
+    if (state.activeTab === 'explore') {
+      resizeSparkline();
+      drawSparkline();
+    }
+    renderTable();
+  }, 50);
+}
+
+init();
+</script>
 </body>
 </html>

@@ -495,4 +495,79 @@ mod tests {
         assert_eq!(extract_extension("archive.tar.gz"), "gz");
         assert_eq!(extract_extension("noext"), "");
     }
+
+    #[test]
+    fn test_html_contains_story_tab() {
+        let (resolved, ghosts, clearing) = make_test_input();
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        let mut buf = Vec::new();
+        export_report(&data, &mut buf).unwrap();
+        let html = String::from_utf8(buf).unwrap();
+
+        // Template must contain Story/Explore tab structure
+        assert!(html.contains("Story"), "missing Story tab");
+        assert!(html.contains("Explore"), "missing Explore tab");
+        // Template must contain stat cards
+        assert!(html.contains("stat-card"), "missing stat cards");
+        // Template must contain the dark theme
+        assert!(html.contains("#0d1117"), "missing dark theme background");
+        // Template must contain sparkline canvas
+        assert!(html.contains("sparkline"), "missing sparkline");
+    }
+
+    #[test]
+    fn test_html_contains_triage_questions() {
+        let (resolved, ghosts, clearing) = make_test_input();
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        let mut buf = Vec::new();
+        export_report(&data, &mut buf).unwrap();
+        let html = String::from_utf8(buf).unwrap();
+
+        // The injected JSON must contain triage question data
+        assert!(
+            html.contains("malware_deployed"),
+            "missing malware triage question"
+        );
+        assert!(
+            html.contains("lateral_movement"),
+            "missing lateral movement question"
+        );
+        assert!(html.contains("Breach & Malware"), "missing triage category");
+    }
 }

@@ -1,6 +1,6 @@
 # Validation Report
 
-Record-level comparison of `usnjrnl-forensic` against **MFTECmd** (Eric Zimmerman), **usn.py** (PoorBillionaire), **dfir_ntfs** (Maxim Suhanov), and **usnrs** (Airbus CERT) using three publicly available forensic disk images.
+Record-level comparison of `usnjrnl-forensic` against **MFTECmd** (Eric Zimmerman), **usnjrnl_rewind** (Yogesh Khatri / CyberCX), **usn.py** (PoorBillionaire), **dfir_ntfs** (Maxim Suhanov), **usnrs** (Airbus CERT), and **Velociraptor** (Rapid7) using three publicly available forensic disk images.
 
 Every USN record is compared by Update Sequence Number — not sampled.
 

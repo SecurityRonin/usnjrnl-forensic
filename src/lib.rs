@@ -16,4 +16,5 @@ pub mod output;
 pub mod refs;
 pub mod rewind;
 pub mod rules;
+pub mod triage;
 pub mod usn;

@@ -8,7 +8,7 @@ Every USN record is compared by Update Sequence Number — not sampled.
 
 | Component | Version | Source |
 |-----------|---------|--------|
-| usnjrnl-forensic | 0.1.4 | [crates.io](https://crates.io/crates/usnjrnl-forensic) |
+| usnjrnl-forensic | 0.4.0 | [crates.io](https://crates.io/crates/usnjrnl-forensic) |
 | [MFTECmd](https://github.com/EricZimmerman/MFTECmd) | 1.3.0.0 (.NET 9) | [GitHub Releases](https://github.com/EricZimmerman/MFTECmd/releases) |
 | [usn.py](https://github.com/PoorBillionaire/USN-Journal-Parser) (usnparser) | 4.1.5 | `pip3 install usnparser` |
 | [dfir_ntfs](https://github.com/msuhanov/dfir_ntfs) (ntfs_parser) | 1.1.20 | `pip3 install git+https://github.com/msuhanov/dfir_ntfs.git` |
@@ -111,7 +111,7 @@ Python post-processing script that implements the [Rewind algorithm](https://cyb
 | USN versions | V2, V3, V4 | Via MFTECmd (V2, V3) |
 | Output formats | CSV, JSONL, SQLite, body, TLN, XML | CSV, SQLite |
 | Additional analysis | Timestomping, $LogFile correlation, $MFTMirr integrity, rule engine, USN carving | Path resolution only |
-| Automated tests | 388 unit tests | None |
+| Automated tests | 433 unit tests | None |
 | Language | Rust (compiled) | Python |
 
 ```
@@ -276,7 +276,9 @@ Two bugs account for all 45,751 incorrect paths:
 
 ## Unallocated Space Carving
 
-`usnjrnl-forensic` can carve USN journal records and MFT entries from unallocated space when processing E01 or raw disk images (`--carve-unallocated`). No other USN journal tool provides this capability, so no cross-tool comparison is possible. This section documents the methodology, results, and validation approach.
+The preceding sections validate `usnjrnl-forensic`'s core parser and path resolution against other tools using allocated journal records. But the allocated `$UsnJrnl:$J` represents only a window into the volume's history — as new records are written, old ones are overwritten. `usnjrnl-forensic` extends this window by carving deleted USN records and MFT entries from unallocated disk space (`--carve-unallocated`).
+
+No other USN journal tool provides this capability (NTFS Log Tracker carves from $LogFile but not from unallocated space), so cross-tool comparison is not possible. This section documents the methodology, results, and validation approach.
 
 ### Methodology
 
@@ -334,9 +336,13 @@ Since no other tool carves USN records from unallocated space in disk images, cr
    fls -o <offset> image.E01 11                            # list $Extend to find $UsnJrnl inode
    icat -o <offset> image.E01 <usnjrnl_inode>-128-3 > '$J' # extract $UsnJrnl:$J data stream
    ```
-3. Run usnjrnl-forensic:
+3. Run usnjrnl-forensic (parsing + path resolution):
    ```
    usnjrnl-forensic -j '$J' -m '$MFT' --csv ours.csv --stats
+   ```
+   Or with carving directly from the image:
+   ```
+   usnjrnl-forensic --image image.E01 --carve-unallocated --csv ours_with_carved.csv
    ```
 4. Run MFTECmd (with `-m` for path resolution comparison):
    ```

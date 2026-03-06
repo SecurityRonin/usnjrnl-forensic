@@ -21,6 +21,7 @@
 
 use std::collections::HashMap;
 
+use crate::mft::carver::CarvedMftEntry;
 use crate::usn::{UsnReason, UsnRecord};
 
 /// Key for the rewind lookup table: (mft_entry, mft_sequence).
@@ -105,6 +106,21 @@ impl RewindEngine {
     /// Number of entries in the lookup table.
     pub fn lookup_len(&self) -> usize {
         self.lookup.len()
+    }
+
+    /// Seed the engine with carved MFT entries from unallocated space.
+    ///
+    /// Uses `or_insert` so carved entries never overwrite allocated MFT data
+    /// that was seeded via `from_mft`. Historical entries (different sequence
+    /// numbers from the same MFT entry) are added as new keys.
+    pub fn seed_from_carved(&mut self, entries: &[CarvedMftEntry]) {
+        for e in entries {
+            let key = EntryKey::new(e.entry_number, e.sequence_number);
+            self.lookup.entry(key).or_insert(EntryInfo {
+                name: e.filename.clone(),
+                parent: EntryKey::new(e.parent_entry, e.parent_sequence),
+            });
+        }
     }
 
     /// Insert or update an entry in the lookup table.
@@ -660,6 +676,106 @@ mod tests {
     }
 
     #[test]
+    fn test_seed_from_carved_adds_entries() {
+        use crate::mft::carver::CarvedMftEntry;
+
+        let mut engine = RewindEngine::from_mft(vec![
+            (5, 5, ".".into(), 5, 5), // root
+            (10, 1, "Users".into(), 5, 5),
+        ]);
+        assert_eq!(engine.lookup_len(), 2);
+
+        let carved = vec![
+            CarvedMftEntry {
+                offset: 0,
+                entry_number: 20,
+                sequence_number: 1,
+                filename: "admin".to_string(),
+                parent_entry: 10,
+                parent_sequence: 1,
+                is_directory: true,
+                is_in_use: false, // deleted — carved from unallocated
+            },
+            CarvedMftEntry {
+                offset: 1024,
+                entry_number: 30,
+                sequence_number: 1,
+                filename: "Desktop".to_string(),
+                parent_entry: 20,
+                parent_sequence: 1,
+                is_directory: true,
+                is_in_use: false,
+            },
+        ];
+
+        engine.seed_from_carved(&carved);
+
+        assert_eq!(engine.lookup_len(), 4);
+        let path = engine.resolve_path(&EntryKey::new(30, 1));
+        assert_eq!(path, ".\\Users\\admin\\Desktop");
+    }
+
+    #[test]
+    fn test_seed_from_carved_does_not_overwrite_allocated() {
+        use crate::mft::carver::CarvedMftEntry;
+
+        // Allocated MFT says entry 100 seq 1 = "current.txt"
+        let mut engine = RewindEngine::from_mft(vec![(100, 1, "current.txt".into(), 5, 5)]);
+
+        // Carved data also has entry 100 seq 1 but with old name
+        let carved = vec![CarvedMftEntry {
+            offset: 0,
+            entry_number: 100,
+            sequence_number: 1,
+            filename: "old_name.txt".to_string(),
+            parent_entry: 5,
+            parent_sequence: 5,
+            is_directory: false,
+            is_in_use: false,
+        }];
+
+        engine.seed_from_carved(&carved);
+
+        // Allocated entry should win — carved should not overwrite
+        assert_eq!(engine.lookup_len(), 1);
+        let path = engine.resolve_path(&EntryKey::new(100, 1));
+        assert_eq!(path, ".\\current.txt");
+    }
+
+    #[test]
+    fn test_seed_from_carved_adds_historical_sequence() {
+        use crate::mft::carver::CarvedMftEntry;
+
+        // Allocated MFT has entry 100 seq 3 (current)
+        let mut engine = RewindEngine::from_mft(vec![(100, 3, "new_file.txt".into(), 5, 5)]);
+
+        // Carved: entry 100 seq 1 (historical, different sequence)
+        let carved = vec![CarvedMftEntry {
+            offset: 0,
+            entry_number: 100,
+            sequence_number: 1,
+            filename: "old_file.txt".to_string(),
+            parent_entry: 5,
+            parent_sequence: 5,
+            is_directory: false,
+            is_in_use: false,
+        }];
+
+        engine.seed_from_carved(&carved);
+
+        // Both should exist — different sequence numbers
+        assert_eq!(engine.lookup_len(), 2);
+        assert_eq!(
+            engine.resolve_path(&EntryKey::new(100, 3)),
+            ".\\new_file.txt"
+        );
+        assert_eq!(
+            engine.resolve_path(&EntryKey::new(100, 1)),
+            ".\\old_file.txt"
+        );
+    }
+
+    #[test]
     fn test_resolve_path_from_standalone() {
         // Test the resolve_path_from function directly via rewind behavior
         let mut engine = RewindEngine::new();
@@ -677,5 +793,142 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].parent_path, ".");
         assert_eq!(resolved[0].full_path, ".\\root_file.txt");
+    }
+
+    // ─── Carving pipeline integration tests ──────────────────────────────────
+
+    #[test]
+    fn test_carved_records_resolve_paths_via_carved_mft() {
+        use crate::mft::carver::CarvedMftEntry;
+        use crate::usn::CarvedRecord;
+
+        // Simulate: allocated MFT only has root (entry 5).
+        // Carved MFT recovers a deleted directory tree: Users/admin/Temp
+        // Carved USN records reference files under that deleted tree.
+
+        let mut engine = RewindEngine::from_mft(vec![]);
+
+        let carved_mft = vec![
+            CarvedMftEntry {
+                offset: 0,
+                entry_number: 10,
+                sequence_number: 1,
+                filename: "Users".to_string(),
+                parent_entry: 5,
+                parent_sequence: 5,
+                is_directory: true,
+                is_in_use: false,
+            },
+            CarvedMftEntry {
+                offset: 1024,
+                entry_number: 20,
+                sequence_number: 1,
+                filename: "admin".to_string(),
+                parent_entry: 10,
+                parent_sequence: 1,
+                is_directory: true,
+                is_in_use: false,
+            },
+            CarvedMftEntry {
+                offset: 2048,
+                entry_number: 30,
+                sequence_number: 1,
+                filename: "Temp".to_string(),
+                parent_entry: 20,
+                parent_sequence: 1,
+                is_directory: true,
+                is_in_use: false,
+            },
+        ];
+
+        engine.seed_from_carved(&carved_mft);
+
+        // Carved USN records: malware.exe created under the deleted Temp dir
+        let carved_usn = vec![CarvedRecord {
+            offset: 50000,
+            record: make_record(
+                500,
+                1,
+                30,
+                1,
+                UsnReason::FILE_CREATE,
+                "malware.exe",
+                99999,
+            ),
+        }];
+
+        // Merge carved USN records into the record list (simulating main.rs logic)
+        let mut all_records: Vec<UsnRecord> = Vec::new();
+        all_records.extend(carved_usn.into_iter().map(|c| c.record));
+
+        let resolved = engine.rewind(&all_records);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].full_path,
+            ".\\Users\\admin\\Temp\\malware.exe",
+            "Carved USN record should resolve via carved MFT directory tree"
+        );
+    }
+
+    #[test]
+    fn test_carved_and_allocated_records_merge_in_pipeline() {
+        use crate::mft::carver::CarvedMftEntry;
+        use crate::usn::CarvedRecord;
+
+        // Allocated: MFT has current tree, USN has recent records
+        let mut engine = RewindEngine::from_mft(vec![
+            (10, 1, "Windows".into(), 5, 5),
+            (20, 1, "System32".into(), 10, 1),
+        ]);
+
+        // Carved: historical MFT directory that was deleted
+        let carved_mft = vec![CarvedMftEntry {
+            offset: 0,
+            entry_number: 50,
+            sequence_number: 2,
+            filename: "HackTools".to_string(),
+            parent_entry: 5,
+            parent_sequence: 5,
+            is_directory: true,
+            is_in_use: false,
+        }];
+        engine.seed_from_carved(&carved_mft);
+
+        // Allocated USN records
+        let allocated = vec![make_record(
+            100,
+            1,
+            20,
+            1,
+            UsnReason::FILE_CREATE,
+            "cmd.exe",
+            1000,
+        )];
+
+        // Carved USN records
+        let carved_usn = vec![CarvedRecord {
+            offset: 80000,
+            record: make_record(
+                200,
+                1,
+                50,
+                2,
+                UsnReason::FILE_CREATE,
+                "mimikatz.exe",
+                500, // older USN offset
+            ),
+        }];
+
+        // Merge: allocated + carved, sorted by USN
+        let mut all_records = allocated;
+        all_records.extend(carved_usn.into_iter().map(|c| c.record));
+        all_records.sort_by_key(|r| r.usn);
+
+        let resolved = engine.rewind(&all_records);
+        assert_eq!(resolved.len(), 2);
+
+        // Carved record (lower USN) comes first after sorting
+        assert_eq!(resolved[0].full_path, ".\\HackTools\\mimikatz.exe");
+        assert_eq!(resolved[1].full_path, ".\\Windows\\System32\\cmd.exe");
     }
 }

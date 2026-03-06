@@ -2,15 +2,15 @@
 
 [![Crates.io](https://img.shields.io/crates/v/usnjrnl-forensic.svg)](https://crates.io/crates/usnjrnl-forensic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-400-green.svg)](https://github.com/SecurityRonin/usnjrnl-forensic)
+[![Tests](https://img.shields.io/badge/tests-433-green.svg)](https://github.com/SecurityRonin/usnjrnl-forensic)
 [![Sponsor](https://img.shields.io/badge/sponsor-h4x0r-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/h4x0r)
 
 The most comprehensive NTFS USN Journal forensic analysis tool. Period.
 
-`usnjrnl-forensic` parses `$UsnJrnl:$J` records, reconstructs full file paths through MFT entry reuse, correlates four NTFS artifacts to recover evidence missed by other tools, and detects attacker activity through built-in forensic rules. It can open E01 forensic images directly — no manual extraction needed.
+`usnjrnl-forensic` parses `$UsnJrnl:$J` records, reconstructs full file paths through MFT entry reuse, correlates four NTFS artifacts to recover evidence missed by other tools, carves deleted records from unallocated space, and detects attacker activity through built-in forensic rules. It can open E01 forensic images directly — no manual extraction needed.
 
 ```
-$ usnjrnl-forensic --image evidence.E01 --detect-timestomping --csv timeline.csv
+$ usnjrnl-forensic --image evidence.E01 --carve-unallocated --detect-timestomping --csv timeline.csv
 
 [*] Opening disk image: evidence.E01
 [*] Detected format: Ewf
@@ -20,6 +20,9 @@ $ usnjrnl-forensic --image evidence.E01 --detect-timestomping --csv timeline.csv
 [+] $MFTMirr is consistent with $MFT
 [+] 5,378 USN records recovered from $LogFile
 [+] 771 ghost records found in $LogFile (not present in $UsnJrnl)
+[+] Carved 1,247 USN records from unallocated space
+[+] Carved 89 MFT entries from unallocated space
+[+] Merged 1,247 carved USN records into timeline (848,540 total)
 [!] 3 potential timestomping indicators
 [+] All paths fully resolved (0 UNKNOWN)
 ```
@@ -102,6 +105,14 @@ This also works with raw (dd) disk images:
 usnjrnl-forensic --image disk.raw --csv output.csv
 ```
 
+#### Carve deleted records from unallocated space
+
+```bash
+usnjrnl-forensic --image evidence.E01 --carve-unallocated --csv timeline.csv
+```
+
+This scans unallocated disk space for deleted USN records and MFT entries, merges them into the timeline, and uses carved directory entries to resolve paths for carved records. See [Unallocated Space Carving](#unallocated-space-carving) for details.
+
 ### From pre-extracted artifacts
 
 #### Basic: parse $UsnJrnl with MFT path resolution
@@ -179,6 +190,7 @@ How `usnjrnl-forensic` compares against every notable USN journal tool, past and
 | Anti-forensics detection | Yes | No | No | No | Basic | No | No |
 | Ransomware pattern detection | Yes | No | No | No | No | No | No |
 | USN record carving | Yes | No | No | No | Yes | No | No |
+| MFT entry carving | Yes | No | No | No | No | No | No |
 | Custom rule engine | Yes | No | No | No | No | No | No |
 
 ### Performance & Monitoring
@@ -212,7 +224,7 @@ How `usnjrnl-forensic` compares against every notable USN journal tool, past and
 
 | | usnjrnl-forensic | MFTECmd | ANJP | ntfs-linker | NTFS Log Tracker | dfir_ntfs | CyberCX Rewind |
 |---------|:-------:|:-------:|:----:|:-----------:|:----------------:|:---------:|:--------------:|
-| **Feature count** | **25/25** | **6/25** | **4/25** | **5/25** | **6/25** | **7/25** | **3/25** |
+| **Feature count** | **26/26** | **6/26** | **4/26** | **5/26** | **6/26** | **7/26** | **3/26** |
 
 Feature count includes all rows from Input & Parsing, Path Resolution, Forensic Detection, Performance, and Output sections. Partial/Basic counts as half.
 
@@ -265,6 +277,31 @@ Or when tampering is detected:
 [!] $MFTMirr INCONSISTENCY DETECTED:
     Entry 2 ($LogFile): 14 byte differences
 ```
+
+### Unallocated Space Carving
+
+QuadLink recovers ghost records from $LogFile, but there's an even larger pool of evidence: unallocated disk space. When files are deleted and their MFT entries reused, the original USN records and directory structures often persist in unallocated clusters until overwritten. The `--carve-unallocated` flag scans the entire NTFS partition for these remnants:
+
+```
+$ usnjrnl-forensic --image evidence.E01 --carve-unallocated --csv timeline.csv
+
+[+] Carved 1,247 USN records from unallocated space
+[+] Carved 89 MFT entries from unallocated space
+[*] Carving stats: 29,841.3 MB scanned, 7,289 chunks, 312 USN dupes removed, 45 MFT dupes removed
+[+] Merged 1,247 carved USN records into timeline (848,540 total)
+[*] Seeding rewind engine with 89 carved MFT entries
+```
+
+The carving pipeline:
+
+1. **Scans** the partition in 4 MB overlapping chunks, looking for valid USN_RECORD_V2/V3 structures (8-byte aligned) and MFT entries ("FILE" signature at 1024-byte boundaries)
+2. **Validates** each candidate: checks record structure, timestamp sanity (2000-2030), filename encoding, and MFT attribute chains
+3. **Deduplicates** against allocated records already parsed from $UsnJrnl and $MFT — only genuinely new records survive
+4. **Merges** carved USN records into the main timeline (sorted by USN offset) and seeds the Rewind engine with carved MFT directory entries so carved records get full path resolution
+
+Carved records are particularly valuable for recovering evidence of deleted attacker tools, cleared journals, or files that existed before the current $UsnJrnl window. In validation testing, MaxPowers produced 5 million carved USN records from a journal that only contained 333K allocated records — a 15x increase in timeline coverage. Carved MFT directory entries restore the directory tree context needed to resolve full paths for those recovered records.
+
+Requires `--image` (E01 or raw disk). Not available in pre-extracted artifact mode since unallocated space is only accessible from the disk image.
 
 ### Anti-Forensics Detection
 
@@ -356,11 +393,16 @@ graph LR
     IMG --> MFT
     IMG --> LF
     IMG --> Mirror
+    IMG --> Unalloc["Unallocated<br/>Scanner"]
 
     J["$UsnJrnl:$J"] --> USN["USN Parser<br/>V2 / V3 / V4"]
     USN --> Rewind["Rewind Engine"]
     MFT["$MFT"] --> MFTP["MFT Parser"]
     MFTP --> Rewind
+    Unalloc --> USNC["USN Carver"]
+    Unalloc --> MFTC["MFT Carver"]
+    USNC --> Rewind
+    MFTC --> Rewind
     Rewind --> Resolved["Resolved Records"]
     Resolved --> Output["Output<br/>CSV · JSONL · SQLite<br/>Body · TLN · XML"]
     Resolved --> Rules["Rule Engine"]
@@ -378,10 +420,10 @@ graph LR
 ```
 
 Modules:
-- `image`: E01/raw disk image opening, NTFS partition discovery, artifact extraction (optional `image` feature)
-- `usn`: Binary parsing of USN_RECORD_V2, V3, V4 with streaming and parallel modes
-- `mft`: $MFT entry extraction with SI/FN timestamp pairs
-- `rewind`: CyberCX Rewind algorithm for path reconstruction
+- `image`: E01/raw disk image opening, NTFS partition discovery, artifact extraction, unallocated space scanning (optional `image` feature)
+- `usn`: Binary parsing of USN_RECORD_V2, V3, V4 with streaming, parallel, and carving modes
+- `mft`: $MFT entry extraction with SI/FN timestamp pairs and MFT entry carving
+- `rewind`: CyberCX Rewind algorithm for path reconstruction (seeds from allocated and carved MFT)
 - `logfile`: $LogFile RCRD page analysis and embedded USN extraction
 - `mftmirr`: $MFTMirr integrity verification
 - `correlation`: QuadLink engine linking all four artifacts
@@ -399,7 +441,7 @@ See the full report: **[docs/VALIDATION.md](docs/VALIDATION.md)**
 
 ## Testing
 
-400 unit tests covering every module. Run with:
+433 unit tests covering every module. Run with:
 
 ```bash
 cargo test

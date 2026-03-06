@@ -1,3 +1,5 @@
+#[cfg(feature = "image")]
+use std::collections::HashSet;
 use std::io::BufWriter;
 use std::path::PathBuf;
 
@@ -232,6 +234,50 @@ fn main() -> Result<()> {
         Vec::new()
     };
 
+    // ─── Unallocated space carving (optional) ─────────────────────────────────
+
+    let mut records = records;
+    let carved_mft_entries = if cli.carve_unallocated {
+        if let Some(ref image_path) = cli.image {
+            let carve_results = perform_carving(image_path, &records, mft_data.as_ref())?;
+
+            eprintln!(
+                "[+] Carved {} USN records from unallocated space",
+                carve_results.usn_records.len()
+            );
+            eprintln!(
+                "[+] Carved {} MFT entries from unallocated space",
+                carve_results.mft_entries.len()
+            );
+            eprintln!(
+                "[*] Carving stats: {:.1} MB scanned, {} chunks, {} USN dupes removed, {} MFT dupes removed",
+                carve_results.stats.bytes_scanned as f64 / 1_048_576.0,
+                carve_results.stats.chunks_processed,
+                carve_results.stats.usn_duplicates_removed,
+                carve_results.stats.mft_duplicates_removed,
+            );
+
+            // Merge carved USN records into the record list
+            let carved_usn_count = carve_results.usn_records.len();
+            records.extend(carve_results.usn_records.into_iter().map(|c| c.record));
+            records.sort_by_key(|r| r.usn);
+
+            if carved_usn_count > 0 {
+                eprintln!(
+                    "[+] Merged {} carved USN records into timeline ({} total)",
+                    carved_usn_count,
+                    records.len()
+                );
+            }
+
+            carve_results.mft_entries
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
     // ─── Rewind: full path reconstruction ────────────────────────────────────
 
     eprintln!("[*] Running journal rewind for full path reconstruction...");
@@ -245,6 +291,15 @@ fn main() -> Result<()> {
         eprintln!("[*] No MFT provided - paths will be reconstructed from journal only");
         RewindEngine::new()
     };
+
+    // Seed rewind with carved MFT entries (won't overwrite allocated data)
+    if !carved_mft_entries.is_empty() {
+        eprintln!(
+            "[*] Seeding rewind engine with {} carved MFT entries",
+            carved_mft_entries.len()
+        );
+        engine.seed_from_carved(&carved_mft_entries);
+    }
 
     let resolved = engine.rewind(&records);
     eprintln!("[+] {} records resolved with full paths", resolved.len());
@@ -473,6 +528,70 @@ fn resolve_from_image(
 ) -> Result<(Option<tempfile::TempDir>, ArtifactPaths)> {
     bail!(
         "Disk image support requires the 'image' feature.\n\
+         Rebuild with: cargo build --release --features image"
+    );
+}
+
+/// Scan unallocated space in a disk image for carved USN records and MFT entries.
+///
+/// Re-opens the image, finds the NTFS partition, builds deduplication sets from
+/// the already-parsed allocated records, and runs the carving scanner.
+#[cfg(feature = "image")]
+fn perform_carving(
+    image_path: &std::path::Path,
+    allocated_records: &[usn::UsnRecord],
+    mft_data: Option<&MftData>,
+) -> Result<usnjrnl_forensic::image::unallocated::UnallocatedScanResults> {
+    eprintln!("[*] Scanning unallocated space for carved records...");
+
+    // Build deduplication sets from allocated artifacts
+    let known_usn: HashSet<i64> = allocated_records.iter().map(|r| r.usn).collect();
+    let known_mft: HashSet<(u64, u16)> = mft_data
+        .map(|m| {
+            m.entries
+                .iter()
+                .map(|e| (e.entry_number, e.sequence_number))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    eprintln!(
+        "[*] Dedup sets: {} known USN offsets, {} known MFT entries",
+        known_usn.len(),
+        known_mft.len()
+    );
+
+    // Re-open the image and find the NTFS partition
+    let mut reader = ewf::EwfReader::open(image_path)
+        .map_err(|e| anyhow::anyhow!("Failed to re-open image for carving: {e}"))?;
+    let partition = usnjrnl_forensic::image::find_ntfs_partition(&mut reader)?;
+
+    eprintln!(
+        "[*] Scanning partition: offset={}, size={:.1} MB",
+        partition.offset,
+        partition.size as f64 / 1_048_576.0
+    );
+
+    usnjrnl_forensic::image::unallocated::scan_for_unallocated(
+        &mut reader,
+        partition.offset,
+        partition.size,
+        &known_usn,
+        &known_mft,
+        0, // default chunk size
+    )
+    .context("Failed to scan unallocated space")
+}
+
+/// Stub when the `image` feature is not enabled.
+#[cfg(not(feature = "image"))]
+fn perform_carving(
+    _image_path: &std::path::Path,
+    _allocated_records: &[usn::UsnRecord],
+    _mft_data: Option<&MftData>,
+) -> Result<usnjrnl_forensic::image::unallocated::UnallocatedScanResults> {
+    bail!(
+        "Unallocated carving requires the 'image' feature.\n\
          Rebuild with: cargo build --release --features image"
     );
 }

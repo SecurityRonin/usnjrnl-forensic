@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/usnjrnl-forensic.svg)](https://crates.io/crates/usnjrnl-forensic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-433-green.svg)](https://github.com/SecurityRonin/usnjrnl-forensic)
+[![Tests](https://img.shields.io/badge/tests-445-green.svg)](https://github.com/SecurityRonin/usnjrnl-forensic)
 [![Sponsor](https://img.shields.io/badge/sponsor-h4x0r-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/h4x0r)
 
 The most comprehensive NTFS USN Journal forensic analysis tool. Period.
@@ -112,6 +112,14 @@ usnjrnl-forensic --image evidence.E01 --carve-unallocated --csv timeline.csv
 ```
 
 This scans unallocated disk space for deleted USN records and MFT entries, merges them into the timeline, and uses carved directory entries to resolve paths for carved records. See [Unallocated Space Carving](#unallocated-space-carving) for details.
+
+#### Generate a triage report
+
+```bash
+usnjrnl-forensic --image evidence.E01 --carve-unallocated --report triage.html
+```
+
+Produces a self-contained HTML file with a **Story** tab (question-driven forensic narrative) and an **Explore** tab (full timeline workbench with search, filters, and sparkline). Opens in any browser — no server needed.
 
 ### From pre-extracted artifacts
 
@@ -381,6 +389,7 @@ for event in monitor.poll_once() {
 | Sleuthkit body | `--body` | Pipe-delimited, feeds into `mactime` and `log2timeline` |
 | TLN | `--tln` | 5-field pipe-delimited timeline format |
 | XML | `--xml` | Structured XML with full record fields |
+| HTML Report | `--report` | Self-contained triage report with Story + Explore tabs |
 
 All formats include: timestamp, USN offset, MFT entry/sequence, parent entry/sequence, resolved parent path, filename, extension, file attributes, reason flags, source info, security ID, and record version.
 
@@ -441,7 +450,7 @@ See the full report: **[docs/VALIDATION.md](docs/VALIDATION.md)**
 
 ## Testing
 
-433 unit tests covering every module. Run with:
+445 unit tests covering every module. Run with:
 
 ```bash
 cargo test

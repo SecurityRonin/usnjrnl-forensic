@@ -124,7 +124,7 @@ fn try_carve_entry(
 
     // Validate first attribute offset
     let first_attr_offset = read_u16_le(entry, 20) as usize;
-    if first_attr_offset < 48 || first_attr_offset >= MFT_ENTRY_SIZE - 8 {
+    if !(48..MFT_ENTRY_SIZE - 8).contains(&first_attr_offset) {
         stats.rejected += 1;
         return None;
     }
@@ -181,10 +181,7 @@ fn try_carve_entry(
 
     match best_filename {
         Some((filename, parent_entry, parent_sequence, _)) => {
-            debug!(
-                "Carved MFT entry at offset 0x{:x}: #{} '{}'",
-                offset, entry_number, filename
-            );
+            debug!("Carved MFT entry at offset 0x{offset:x}: #{entry_number} '{filename}'");
             Some(CarvedMftEntry {
                 offset,
                 entry_number,

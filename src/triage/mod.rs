@@ -41,6 +41,8 @@ pub struct TriageQuery {
     pub exclude_patterns: Vec<&'static str>,
     /// Substring filters matched against the filename (case-insensitive, any match).
     pub filename_filter: Vec<&'static str>,
+    /// Filter by record source (e.g. "carved", "ghost"). Empty = match all sources.
+    pub source_filter: Vec<&'static str>,
 }
 
 /// Result of evaluating a single triage question against the record set.
@@ -95,8 +97,17 @@ fn matches_query(query: &TriageQuery, record: &ResolvedRecord) -> bool {
         && query.reasons.is_none()
         && query.exclude_patterns.is_empty()
         && query.filename_filter.is_empty()
+        && query.source_filter.is_empty()
     {
         return false;
+    }
+
+    // Source filter: record source must match one of the listed sources.
+    if !query.source_filter.is_empty() {
+        let source_str = record.source.as_str();
+        if !query.source_filter.contains(&source_str) {
+            return false;
+        }
     }
 
     // Reason flag check: record must share at least one flag with the query.
@@ -167,7 +178,7 @@ mod tests {
     use crate::usn::{FileAttributes, UsnRecord};
     use chrono::DateTime;
 
-    /// Helper to create a `ResolvedRecord` for testing.
+    /// Helper to create a `ResolvedRecord` for testing (defaults to Allocated source).
     fn make_resolved(full_path: &str, filename: &str, reason: UsnReason) -> ResolvedRecord {
         ResolvedRecord {
             record: UsnRecord {
@@ -186,6 +197,7 @@ mod tests {
             },
             full_path: full_path.to_string(),
             parent_path: ".".to_string(),
+            source: crate::rewind::RecordSource::Allocated,
         }
     }
 
@@ -309,6 +321,181 @@ mod tests {
         assert!(results[0].has_hits);
         assert_eq!(results[0].hit_count, 1);
         assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    // ─── Tests for source filtering ───────────────────────────────────────
+
+    fn make_resolved_with_source(
+        full_path: &str,
+        filename: &str,
+        reason: UsnReason,
+        source: crate::rewind::RecordSource,
+    ) -> ResolvedRecord {
+        let mut r = make_resolved(full_path, filename, reason);
+        r.source = source;
+        r
+    }
+
+    #[test]
+    fn test_source_filter_matches_carved_only() {
+        use crate::rewind::RecordSource;
+
+        let records = vec![
+            make_resolved_with_source(
+                r".\Users\admin\secret.docx",
+                "secret.docx",
+                UsnReason::FILE_CREATE,
+                RecordSource::Allocated,
+            ),
+            make_resolved_with_source(
+                r".\Users\admin\deleted.exe",
+                "deleted.exe",
+                UsnReason::FILE_CREATE,
+                RecordSource::Carved,
+            ),
+            make_resolved_with_source(
+                r".\Users\admin\ghost.dll",
+                "ghost.dll",
+                UsnReason::FILE_CREATE,
+                RecordSource::Ghost,
+            ),
+        ];
+
+        let questions = vec![TriageQuestion {
+            id: "carved_only",
+            category: "Test",
+            question: "Only carved records?",
+            query: TriageQuery {
+                source_filter: vec!["carved"],
+                ..Default::default()
+            },
+        }];
+
+        let results = run_triage(&questions, &records);
+        assert_eq!(results[0].hit_count, 1, "only carved record should match");
+        assert_eq!(results[0].record_indices, vec![1]);
+    }
+
+    #[test]
+    fn test_source_filter_matches_carved_and_ghost() {
+        use crate::rewind::RecordSource;
+
+        let records = vec![
+            make_resolved_with_source(
+                r".\allocated.txt",
+                "allocated.txt",
+                UsnReason::FILE_CREATE,
+                RecordSource::Allocated,
+            ),
+            make_resolved_with_source(
+                r".\carved.exe",
+                "carved.exe",
+                UsnReason::FILE_CREATE,
+                RecordSource::Carved,
+            ),
+            make_resolved_with_source(
+                r".\ghost.dll",
+                "ghost.dll",
+                UsnReason::FILE_CREATE,
+                RecordSource::Ghost,
+            ),
+        ];
+
+        let questions = vec![TriageQuestion {
+            id: "recovered",
+            category: "Test",
+            question: "All recovered?",
+            query: TriageQuery {
+                source_filter: vec!["carved", "ghost"],
+                ..Default::default()
+            },
+        }];
+
+        let results = run_triage(&questions, &records);
+        assert_eq!(results[0].hit_count, 2, "carved + ghost should match");
+        assert_eq!(results[0].record_indices, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_empty_source_filter_matches_all() {
+        use crate::rewind::RecordSource;
+
+        let records = vec![
+            make_resolved_with_source(
+                r".\a.txt",
+                "a.txt",
+                UsnReason::FILE_CREATE,
+                RecordSource::Allocated,
+            ),
+            make_resolved_with_source(
+                r".\b.txt",
+                "b.txt",
+                UsnReason::FILE_CREATE,
+                RecordSource::Carved,
+            ),
+        ];
+
+        // source_filter is empty but reasons is set, so this is NOT a
+        // placeholder query — the empty source filter should not restrict
+        // which sources match.
+        let questions = vec![TriageQuestion {
+            id: "all",
+            category: "Test",
+            question: "All records?",
+            query: TriageQuery {
+                reasons: Some(UsnReason::FILE_CREATE),
+                source_filter: vec![], // empty = match all
+                ..Default::default()
+            },
+        }];
+
+        let results = run_triage(&questions, &records);
+        assert_eq!(
+            results[0].hit_count, 2,
+            "empty filter should match all sources"
+        );
+    }
+
+    #[test]
+    fn test_recovered_evidence_query_uses_source_filter() {
+        use crate::rewind::RecordSource;
+
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "recovered_evidence")
+            .expect("missing recovered_evidence");
+
+        // Verify the query actually has a source filter
+        assert!(
+            !q.query.source_filter.is_empty(),
+            "recovered_evidence must have a source_filter"
+        );
+
+        let records = vec![
+            make_resolved_with_source(
+                r".\normal.txt",
+                "normal.txt",
+                UsnReason::FILE_CREATE,
+                RecordSource::Allocated,
+            ),
+            make_resolved_with_source(
+                r".\recovered.exe",
+                "recovered.exe",
+                UsnReason::FILE_CREATE,
+                RecordSource::Carved,
+            ),
+            make_resolved_with_source(
+                r".\ghost.dll",
+                "ghost.dll",
+                UsnReason::FILE_CREATE,
+                RecordSource::Ghost,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 2, "carved + ghost should match");
     }
 
     // ─── Tests for expanded triage question set ────────────────────────────
@@ -496,5 +683,308 @@ mod tests {
             results[0].hit_count, 1,
             "only the Downloads drop should match, not System32"
         );
+    }
+
+    #[test]
+    fn test_malware_deployed_detects_exe_in_programdata() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "malware_deployed")
+            .expect("missing malware_deployed");
+
+        let records = vec![
+            make_resolved(
+                r".\ProgramData\evil.exe",
+                "evil.exe",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Documents\readme.txt",
+                "readme.txt",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 1);
+        assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_sensitive_data_detects_xlsx_access() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "sensitive_data")
+            .expect("missing sensitive_data");
+
+        let records = vec![
+            make_resolved(
+                r".\Users\admin\Documents\financials.xlsx",
+                "financials.xlsx",
+                UsnReason::DATA_EXTEND | UsnReason::CLOSE,
+            ),
+            make_resolved(
+                r".\Windows\ProgramData\config.xml",
+                "config.xml",
+                UsnReason::DATA_EXTEND,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 1);
+    }
+
+    #[test]
+    fn test_persistence_detects_exe_in_startup() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "persistence")
+            .expect("missing persistence");
+
+        let records = vec![
+            make_resolved(
+                r".\Users\admin\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\backdoor.exe",
+                "backdoor.exe",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Users\admin\Desktop\normal.exe",
+                "normal.exe",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 1);
+        assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_lateral_movement_detects_psexec() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "lateral_movement")
+            .expect("missing lateral_movement");
+
+        let records = vec![
+            make_resolved(
+                r".\Windows\System32\psexec.exe",
+                "psexec.exe",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Windows\System32\notepad.exe",
+                "notepad.exe",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 1);
+        assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_timestomping_detects_basic_info_change_on_exe() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "timestomping")
+            .expect("missing timestomping");
+
+        let records = vec![
+            make_resolved(
+                r".\Users\admin\Temp\payload.exe",
+                "payload.exe",
+                UsnReason::BASIC_INFO_CHANGE,
+            ),
+            make_resolved(
+                r".\Windows\WinSxS\something.exe",
+                "something.exe",
+                UsnReason::BASIC_INFO_CHANGE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 1);
+        assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_source_filter_ghost_only() {
+        use crate::rewind::RecordSource;
+
+        let records = vec![
+            make_resolved_with_source(
+                r".\file_a.exe",
+                "file_a.exe",
+                UsnReason::FILE_CREATE,
+                RecordSource::Allocated,
+            ),
+            make_resolved_with_source(
+                r".\file_b.exe",
+                "file_b.exe",
+                UsnReason::FILE_CREATE,
+                RecordSource::Carved,
+            ),
+            make_resolved_with_source(
+                r".\file_c.exe",
+                "file_c.exe",
+                UsnReason::FILE_CREATE,
+                RecordSource::Ghost,
+            ),
+        ];
+
+        let questions = vec![TriageQuestion {
+            id: "ghost_only",
+            category: "Test",
+            question: "Only ghost records?",
+            query: TriageQuery {
+                source_filter: vec!["ghost"],
+                ..Default::default()
+            },
+        }];
+
+        let results = run_triage(&questions, &records);
+        assert_eq!(results[0].hit_count, 1, "only ghost record should match");
+        assert_eq!(results[0].record_indices, vec![2]);
+    }
+
+    #[test]
+    fn test_record_source_as_str() {
+        use crate::rewind::RecordSource;
+        assert_eq!(RecordSource::Allocated.as_str(), "allocated");
+        assert_eq!(RecordSource::Carved.as_str(), "carved");
+        assert_eq!(RecordSource::Ghost.as_str(), "ghost");
+    }
+
+    // ─── Edge case tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_run_triage_with_empty_records() {
+        let questions = crate::triage::queries::builtin_questions();
+        let results = run_triage(&questions, &[]);
+        assert_eq!(results.len(), 12);
+        for r in &results {
+            assert!(!r.has_hits);
+            assert_eq!(r.hit_count, 0);
+            assert!(r.record_indices.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_run_triage_with_empty_questions() {
+        let records = vec![make_resolved(
+            r".\test.exe",
+            "test.exe",
+            UsnReason::FILE_CREATE,
+        )];
+        let results = run_triage(&[], &records);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_matches_query_empty_query_matches_nothing() {
+        let records = vec![make_resolved(
+            r".\test.exe",
+            "test.exe",
+            UsnReason::FILE_CREATE,
+        )];
+        let questions = vec![TriageQuestion {
+            id: "empty",
+            category: "Test",
+            question: "Empty query?",
+            query: TriageQuery::default(),
+        }];
+        let results = run_triage(&questions, &records);
+        assert!(!results[0].has_hits);
+        assert_eq!(results[0].hit_count, 0);
+    }
+
+    #[test]
+    fn test_matches_query_reasons_only() {
+        let records = vec![
+            make_resolved(r".\anything.txt", "anything.txt", UsnReason::FILE_DELETE),
+            make_resolved(r".\other.txt", "other.txt", UsnReason::FILE_CREATE),
+        ];
+        let questions = vec![TriageQuestion {
+            id: "reasons_only",
+            category: "Test",
+            question: "Only reason filter?",
+            query: TriageQuery {
+                reasons: Some(UsnReason::FILE_DELETE),
+                ..Default::default()
+            },
+        }];
+        let results = run_triage(&questions, &records);
+        assert_eq!(results[0].hit_count, 1);
+        assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_source_filter_case_sensitivity() {
+        use crate::rewind::RecordSource;
+        let records = vec![make_resolved_with_source(
+            r".\test.exe",
+            "test.exe",
+            UsnReason::FILE_CREATE,
+            RecordSource::Carved,
+        )];
+        let questions = vec![TriageQuestion {
+            id: "case_test",
+            category: "Test",
+            question: "Case sensitive?",
+            query: TriageQuery {
+                source_filter: vec!["Carved"], // uppercase C - should NOT match
+                ..Default::default()
+            },
+        }];
+        let results = run_triage(&questions, &records);
+        assert_eq!(
+            results[0].hit_count, 0,
+            "source filter should be case-sensitive"
+        );
+    }
+
+    #[test]
+    fn test_multiple_questions_independent_results() {
+        let records = vec![
+            make_resolved(
+                r".\Windows\Prefetch\CMD.EXE-12345678.pf",
+                "CMD.EXE-12345678.pf",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Users\admin\Downloads\payload.exe",
+                "payload.exe",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+        let questions = crate::triage::queries::builtin_questions();
+        let results = run_triage(&questions, &records);
+
+        // execution_evidence should match the prefetch file
+        let exec = results
+            .iter()
+            .find(|r| r.id == "execution_evidence")
+            .unwrap();
+        assert!(exec.has_hits);
+
+        // initial_access should match the Downloads file
+        let init = results.iter().find(|r| r.id == "initial_access").unwrap();
+        assert!(init.has_hits);
+
+        // data_staging should match nothing (no archive extensions)
+        let staging = results.iter().find(|r| r.id == "data_staging").unwrap();
+        assert!(!staging.has_hits);
     }
 }

@@ -2,3 +2,4 @@
 tarpaulin-report.json
 tests/data/
 .DS_Store
+triage.html

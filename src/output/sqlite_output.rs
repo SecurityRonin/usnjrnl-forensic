@@ -175,6 +175,7 @@ mod tests {
             record,
             full_path: ".\\temp\\test.exe".into(),
             parent_path: ".\\temp".into(),
+            source: crate::rewind::RecordSource::Allocated,
         }];
 
         export_sqlite(&db_path, &resolved, None).unwrap();
@@ -221,6 +222,7 @@ mod tests {
             record,
             full_path: ".\\temp\\test.exe".into(),
             parent_path: ".\\temp".into(),
+            source: crate::rewind::RecordSource::Allocated,
         }];
 
         let mft_entries = vec![
@@ -348,6 +350,7 @@ mod tests {
             record,
             full_path: ".\\noextension".into(),
             parent_path: ".".into(),
+            source: crate::rewind::RecordSource::Allocated,
         }];
 
         export_sqlite(&db_path, &resolved, None).unwrap();

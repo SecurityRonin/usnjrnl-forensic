@@ -165,6 +165,7 @@ mod tests {
                 },
                 full_path: self.full_path,
                 parent_path: self.parent_path,
+                source: crate::rewind::RecordSource::Allocated,
             }
         }
     }

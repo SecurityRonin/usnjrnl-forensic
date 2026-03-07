@@ -52,6 +52,7 @@ mod tests {
             },
             full_path: full_path.into(),
             parent_path: parent_path.into(),
+            source: crate::rewind::RecordSource::Allocated,
         }
     }
 

@@ -242,9 +242,10 @@ pub fn builtin_questions() -> Vec<TriageQuestion> {
             id: "recovered_evidence",
             category: "Recovery",
             question: "What did we recover that the attacker deleted?",
-            // Populated by carving stats and ghost record counts in the
-            // report generator — not by record query matching.
-            query: TriageQuery::default(),
+            query: TriageQuery {
+                source_filter: vec!["carved", "ghost"],
+                ..Default::default()
+            },
         },
     ]
 }

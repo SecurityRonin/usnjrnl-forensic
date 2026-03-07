@@ -1,4 +1,3 @@
-#[cfg(feature = "image")]
 use std::collections::HashSet;
 use std::io::BufWriter;
 use std::path::PathBuf;
@@ -7,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 
 use usnjrnl_forensic::mft::MftData;
-use usnjrnl_forensic::rewind::RewindEngine;
+use usnjrnl_forensic::rewind::{RecordSource, RewindEngine};
 use usnjrnl_forensic::usn;
 
 #[derive(Parser)]
@@ -246,6 +245,7 @@ fn main() -> Result<()> {
     let mut carving_chunks: u64 = 0;
     let mut carving_usn_dupes: u64 = 0;
     let mut carving_mft_dupes: u64 = 0;
+    let mut carved_usn_offsets: HashSet<i64> = HashSet::new();
 
     let mut records = records;
     let carved_mft_entries = if cli.carve_unallocated {
@@ -275,6 +275,14 @@ fn main() -> Result<()> {
             carving_chunks = carve_results.stats.chunks_processed;
             carving_usn_dupes = carve_results.stats.usn_duplicates_removed as u64;
             carving_mft_dupes = carve_results.stats.mft_duplicates_removed as u64;
+
+            // Track carved USN offsets so we can tag them after rewind
+            let carved_usns: HashSet<i64> = carve_results
+                .usn_records
+                .iter()
+                .map(|c| c.record.usn)
+                .collect();
+            carved_usn_offsets = carved_usns;
 
             // Merge carved USN records into the record list
             records.extend(carve_results.usn_records.into_iter().map(|c| c.record));
@@ -319,8 +327,22 @@ fn main() -> Result<()> {
         engine.seed_from_carved(&carved_mft_entries);
     }
 
-    let resolved = engine.rewind(&records);
+    let mut resolved = engine.rewind(&records);
     eprintln!("[+] {} records resolved with full paths", resolved.len());
+
+    // Tag carved records by matching their USN offset
+    if !carved_usn_offsets.is_empty() {
+        let mut tagged = 0usize;
+        for r in resolved.iter_mut() {
+            if carved_usn_offsets.contains(&r.record.usn) {
+                r.source = RecordSource::Carved;
+                tagged += 1;
+            }
+        }
+        if tagged > 0 {
+            eprintln!("[+] Tagged {tagged} resolved records as carved");
+        }
+    }
 
     // Count unknown paths
     let unknown_count = resolved
@@ -406,6 +428,23 @@ fn main() -> Result<()> {
                 eprintln!("    ... and {} more ghost records", ghosts.len() - 20);
             }
         }
+    }
+
+    // Append ghost records to the resolved list tagged as Ghost source.
+    // Ghost records come from $LogFile and lack parent info, so path = filename.
+    if !ghost_records_for_report.is_empty() {
+        let ghost_count = ghost_records_for_report.len();
+        for ghost in &ghost_records_for_report {
+            resolved.push(usnjrnl_forensic::rewind::ResolvedRecord {
+                full_path: format!(".\\{}", ghost.record.filename),
+                parent_path: ".".to_string(),
+                record: ghost.record.clone(),
+                source: RecordSource::Ghost,
+            });
+        }
+        eprintln!(
+            "[+] Added {ghost_count} ghost records to resolved list (tagged as ghost source)"
+        );
     }
 
     // ─── Output ──────────────────────────────────────────────────────────────

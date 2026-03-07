@@ -126,6 +126,7 @@ pub struct ReportGhostRecord {
     pub filename: String,
     pub reasons: Vec<String>,
     pub lsn: u64,
+    pub source: String,
 }
 
 #[derive(Serialize)]
@@ -250,7 +251,7 @@ pub fn build_report_data(input: &ReportInput, triage_questions: &[TriageQuestion
             extension: extract_extension(&r.record.filename),
             reasons: reason_flags_to_strings(r.record.reason),
             file_attributes: format!("{}", r.record.file_attributes),
-            source: "allocated".to_string(),
+            source: r.source.as_str().to_string(),
         })
         .collect();
 
@@ -361,6 +362,7 @@ pub fn build_report_data(input: &ReportInput, triage_questions: &[TriageQuestion
                 filename: g.record.filename.clone(),
                 reasons: reason_flags_to_strings(g.record.reason),
                 lsn: g.lsn,
+                source: "ghost".to_string(),
             })
             .collect(),
         carving_stats: ReportCarvingStats {
@@ -419,6 +421,7 @@ mod tests {
             record,
             full_path: ".\\Windows\\System32\\test.exe".to_string(),
             parent_path: ".\\Windows\\System32".to_string(),
+            source: crate::rewind::RecordSource::Allocated,
         }];
         let clearing = JournalClearingResult {
             clearing_detected: false,
@@ -569,5 +572,325 @@ mod tests {
             "missing lateral movement question"
         );
         assert!(html.contains("What Happened"), "missing triage category");
+    }
+
+    #[test]
+    fn test_report_source_field_reflects_record_source() {
+        let ts = DateTime::from_timestamp(1700000000, 0).unwrap();
+        let base = |mft_entry: u64, filename: &str| UsnRecord {
+            mft_entry,
+            mft_sequence: 1,
+            parent_mft_entry: 5,
+            parent_mft_sequence: 5,
+            usn: 1000,
+            timestamp: ts,
+            reason: UsnReason::FILE_CREATE,
+            filename: filename.to_string(),
+            file_attributes: FileAttributes::ARCHIVE,
+            source_info: 0,
+            security_id: 0,
+            major_version: 2,
+        };
+
+        let resolved = vec![
+            ResolvedRecord {
+                record: base(100, "allocated.txt"),
+                full_path: ".\\allocated.txt".to_string(),
+                parent_path: ".".to_string(),
+                source: crate::rewind::RecordSource::Allocated,
+            },
+            ResolvedRecord {
+                record: base(101, "carved.exe"),
+                full_path: ".\\carved.exe".to_string(),
+                parent_path: ".".to_string(),
+                source: crate::rewind::RecordSource::Carved,
+            },
+            ResolvedRecord {
+                record: base(102, "ghost.dll"),
+                full_path: ".\\ghost.dll".to_string(),
+                parent_path: ".".to_string(),
+                source: crate::rewind::RecordSource::Ghost,
+            },
+        ];
+
+        let clearing = JournalClearingResult {
+            clearing_detected: false,
+            first_usn: Some(1000),
+            timestamp_gaps: vec![],
+            confidence: 0.0,
+        };
+
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &[],
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        assert_eq!(data.records[0].source, "allocated");
+        assert_eq!(data.records[1].source, "carved");
+        assert_eq!(data.records[2].source, "ghost");
+    }
+
+    #[test]
+    fn test_report_triage_recovered_evidence_with_carved_records() {
+        let ts = DateTime::from_timestamp(1700000000, 0).unwrap();
+        let make_record = |mft_entry: u64, filename: &str| UsnRecord {
+            mft_entry,
+            mft_sequence: 1,
+            parent_mft_entry: 5,
+            parent_mft_sequence: 5,
+            usn: 1000,
+            timestamp: ts,
+            reason: UsnReason::FILE_CREATE,
+            filename: filename.to_string(),
+            file_attributes: FileAttributes::ARCHIVE,
+            source_info: 0,
+            security_id: 0,
+            major_version: 2,
+        };
+
+        let resolved = vec![
+            ResolvedRecord {
+                record: make_record(100, "normal.txt"),
+                full_path: ".\\normal.txt".to_string(),
+                parent_path: ".".to_string(),
+                source: crate::rewind::RecordSource::Allocated,
+            },
+            ResolvedRecord {
+                record: make_record(101, "deleted.exe"),
+                full_path: ".\\deleted.exe".to_string(),
+                parent_path: ".".to_string(),
+                source: crate::rewind::RecordSource::Carved,
+            },
+        ];
+
+        let clearing = JournalClearingResult {
+            clearing_detected: false,
+            first_usn: Some(1000),
+            timestamp_gaps: vec![],
+            confidence: 0.0,
+        };
+
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &[],
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        let recovered = data
+            .triage
+            .iter()
+            .find(|t| t.id == "recovered_evidence")
+            .expect("missing recovered_evidence triage result");
+
+        assert!(recovered.has_hits, "should have hits from carved record");
+        assert_eq!(
+            recovered.hit_count, 1,
+            "only the carved record should match"
+        );
+    }
+
+    #[test]
+    fn test_reason_flags_to_strings_single() {
+        let flags = UsnReason::FILE_CREATE;
+        let result = reason_flags_to_strings(flags);
+        assert_eq!(result, vec!["FILE_CREATE"]);
+    }
+
+    #[test]
+    fn test_reason_flags_to_strings_multiple() {
+        let flags = UsnReason::FILE_CREATE | UsnReason::CLOSE;
+        let result = reason_flags_to_strings(flags);
+        assert!(result.contains(&"FILE_CREATE".to_string()));
+        assert!(result.contains(&"CLOSE".to_string()));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_reason_flags_to_strings_empty() {
+        let flags = UsnReason::empty();
+        let result = reason_flags_to_strings(flags);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_extension_edge_cases() {
+        assert_eq!(extract_extension("file.tar.gz"), "gz");
+        assert_eq!(extract_extension(".hidden"), "hidden");
+        assert_eq!(extract_extension("noext"), "");
+        assert_eq!(extract_extension(""), "");
+        assert_eq!(extract_extension("file."), "");
+    }
+
+    #[test]
+    fn test_build_report_data_with_ghost_records() {
+        let (resolved, _, clearing) = make_test_input();
+        let ghost = crate::correlation::GhostRecord {
+            record: UsnRecord {
+                mft_entry: 200,
+                mft_sequence: 1,
+                parent_mft_entry: 5,
+                parent_mft_sequence: 5,
+                usn: 2000,
+                timestamp: DateTime::from_timestamp(1700000100, 0).unwrap(),
+                reason: UsnReason::FILE_DELETE,
+                filename: "ghost_file.txt".to_string(),
+                file_attributes: FileAttributes::ARCHIVE,
+                source_info: 0,
+                security_id: 0,
+                major_version: 2,
+            },
+            lsn: 99999,
+        };
+        let ghosts = vec![ghost];
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        assert_eq!(data.ghost_records.len(), 1);
+        assert_eq!(data.ghost_records[0].filename, "ghost_file.txt");
+        assert_eq!(data.ghost_records[0].lsn, 99999);
+        assert_eq!(data.ghost_records[0].source, "ghost");
+    }
+
+    #[test]
+    fn test_build_report_data_with_carving_stats() {
+        let (resolved, ghosts, clearing) = make_test_input();
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 42,
+            carved_mft_count: 10,
+            carving_bytes_scanned: 1048576,
+            carving_chunks: 128,
+            carving_usn_dupes: 3,
+            carving_mft_dupes: 1,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        assert_eq!(data.carving_stats.usn_carved, 42);
+        assert_eq!(data.carving_stats.mft_carved, 10);
+        assert_eq!(data.carving_stats.bytes_scanned, 1048576);
+        assert_eq!(data.carving_stats.chunks_processed, 128);
+        assert_eq!(data.carving_stats.usn_dupes_removed, 3);
+        assert_eq!(data.carving_stats.mft_dupes_removed, 1);
+    }
+
+    #[test]
+    fn test_build_report_data_with_journal_clearing() {
+        let (resolved, ghosts, _) = make_test_input();
+        let clearing = JournalClearingResult {
+            clearing_detected: true,
+            first_usn: Some(5000),
+            timestamp_gaps: vec![],
+            confidence: 0.85,
+        };
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        assert!(data.detections.journal_clearing.detected);
+        assert!((data.detections.journal_clearing.confidence - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_export_report_error_on_write_failure() {
+        let (resolved, ghosts, clearing) = make_test_input();
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        struct FailWriter;
+        impl std::io::Write for FailWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "disk full"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "disk full"))
+            }
+        }
+
+        let result = export_report(&data, &mut FailWriter);
+        assert!(result.is_err());
     }
 }

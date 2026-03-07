@@ -58,6 +58,28 @@ pub struct EntryInfo {
     pub parent: EntryKey,
 }
 
+/// Where a resolved record originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordSource {
+    /// From the live (allocated) USN journal.
+    Allocated,
+    /// Carved from unallocated disk space.
+    Carved,
+    /// Ghost record inferred from MFT/journal correlation.
+    Ghost,
+}
+
+impl RecordSource {
+    /// Returns the lowercase label used in serialization and source filters.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RecordSource::Allocated => "allocated",
+            RecordSource::Carved => "carved",
+            RecordSource::Ghost => "ghost",
+        }
+    }
+}
+
 /// Result of path resolution for a single USN record.
 #[derive(Debug, Clone)]
 pub struct ResolvedRecord {
@@ -67,6 +89,8 @@ pub struct ResolvedRecord {
     pub full_path: String,
     /// The resolved parent path (e.g. ".\Users\admin\temp").
     pub parent_path: String,
+    /// Where this record originated (allocated journal, carved, or ghost).
+    pub source: RecordSource,
 }
 
 /// The Rewind engine for full path reconstruction.
@@ -243,6 +267,7 @@ impl RewindEngine {
                 record: record.clone(),
                 full_path,
                 parent_path,
+                source: RecordSource::Allocated,
             });
         }
 

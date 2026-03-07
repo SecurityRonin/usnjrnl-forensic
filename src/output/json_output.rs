@@ -89,6 +89,7 @@ mod tests {
             record,
             full_path: ".\\temp\\test.exe".into(),
             parent_path: ".\\temp".into(),
+            source: crate::rewind::RecordSource::Allocated,
         }];
         let mut buf = Vec::new();
         export_jsonl(&resolved, &mut buf).unwrap();

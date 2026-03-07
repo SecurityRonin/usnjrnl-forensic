@@ -98,6 +98,7 @@ mod tests {
             record,
             full_path: ".\\Users\\test.exe".into(),
             parent_path: ".\\Users".into(),
+            source: crate::rewind::RecordSource::Allocated,
         }];
         let mut buf = Vec::new();
         export_csv(&resolved, &mut buf).unwrap();

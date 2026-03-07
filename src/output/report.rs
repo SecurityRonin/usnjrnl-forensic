@@ -568,6 +568,6 @@ mod tests {
             html.contains("lateral_movement"),
             "missing lateral movement question"
         );
-        assert!(html.contains("Breach & Malware"), "missing triage category");
+        assert!(html.contains("What Happened"), "missing triage category");
     }
 }

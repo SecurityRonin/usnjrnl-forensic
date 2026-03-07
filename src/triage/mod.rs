@@ -16,6 +16,7 @@ pub mod queries;
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /// A forensic triage question with its associated query filter.
+#[derive(Debug, Clone)]
 pub struct TriageQuestion {
     /// Unique identifier (e.g. "malware_deployed").
     pub id: &'static str,
@@ -308,5 +309,192 @@ mod tests {
         assert!(results[0].has_hits);
         assert_eq!(results[0].hit_count, 1);
         assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    // ─── Tests for expanded triage question set ────────────────────────────
+
+    #[test]
+    fn test_builtin_questions_returns_12() {
+        let questions = crate::triage::queries::builtin_questions();
+        assert_eq!(
+            questions.len(),
+            12,
+            "expected 12 triage questions, got {}",
+            questions.len()
+        );
+    }
+
+    #[test]
+    fn test_builtin_has_execution_evidence_question() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions.iter().find(|q| q.id == "execution_evidence");
+        assert!(q.is_some(), "missing execution_evidence question");
+    }
+
+    #[test]
+    fn test_prefetch_creation_proves_execution() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "execution_evidence")
+            .expect("missing execution_evidence");
+
+        let records = vec![
+            make_resolved(
+                r".\Windows\Prefetch\COREUPDATE.EXE-A1B2C3D4.pf",
+                "COREUPDATE.EXE-A1B2C3D4.pf",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Windows\Prefetch\SVCHOST.EXE-12345678.pf",
+                "SVCHOST.EXE-12345678.pf",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits, "prefetch creation should be detected");
+        assert_eq!(results[0].hit_count, 2);
+    }
+
+    #[test]
+    fn test_data_staging_detects_archive_in_user_dir() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "data_staging")
+            .expect("missing data_staging");
+
+        let records = vec![
+            make_resolved(
+                r".\Users\admin\Desktop\exfil.zip",
+                "exfil.zip",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Program Files\7zip\7z.dll",
+                "7z.dll",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(
+            results[0].hit_count, 1,
+            "only the user-dir archive should match"
+        );
+        assert_eq!(results[0].record_indices, vec![0]);
+    }
+
+    #[test]
+    fn test_credential_access_matches_sam_by_path() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "credential_access")
+            .expect("missing credential_access");
+
+        let records = vec![
+            // Real SAM hive path — should match
+            make_resolved(r".\Windows\System32\config\SAM", "SAM", UsnReason::CLOSE),
+            // Random file named "sam" — should NOT match
+            make_resolved(
+                r".\Users\sam\Documents\report.docx",
+                "report.docx",
+                UsnReason::CLOSE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(
+            results[0].hit_count, 1,
+            "should only match the config\\SAM path, not random 'sam' user dir"
+        );
+    }
+
+    #[test]
+    fn test_evidence_destruction_detects_evtx_deletion() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "evidence_destruction")
+            .expect("missing evidence_destruction");
+
+        let records = vec![
+            make_resolved(
+                r".\Windows\System32\winevt\Logs\Security.evtx",
+                "Security.evtx",
+                UsnReason::FILE_DELETE,
+            ),
+            make_resolved(
+                r".\Windows\Prefetch\MIMIKATZ.EXE-AABBCCDD.pf",
+                "MIMIKATZ.EXE-AABBCCDD.pf",
+                UsnReason::FILE_DELETE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(
+            results[0].hit_count, 2,
+            "both evtx and pf deletion should match"
+        );
+    }
+
+    #[test]
+    fn test_file_disguise_detects_ads_operations() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "file_disguise")
+            .expect("missing file_disguise");
+
+        let records = vec![
+            make_resolved(
+                r".\Users\admin\document.docx",
+                "document.docx",
+                UsnReason::NAMED_DATA_EXTEND,
+            ),
+            make_resolved(
+                r".\Users\admin\normal.txt",
+                "normal.txt",
+                UsnReason::DATA_EXTEND,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(results[0].hit_count, 1, "only ADS operation should match");
+    }
+
+    #[test]
+    fn test_initial_access_detects_exe_in_downloads() {
+        let questions = crate::triage::queries::builtin_questions();
+        let q = questions
+            .iter()
+            .find(|q| q.id == "initial_access")
+            .expect("missing initial_access");
+
+        let records = vec![
+            make_resolved(
+                r".\Users\admin\Downloads\payload.exe",
+                "payload.exe",
+                UsnReason::FILE_CREATE,
+            ),
+            make_resolved(
+                r".\Windows\System32\cmd.exe",
+                "cmd.exe",
+                UsnReason::FILE_CREATE,
+            ),
+        ];
+
+        let results = run_triage(&[q.clone()], &records);
+        assert!(results[0].has_hits);
+        assert_eq!(
+            results[0].hit_count, 1,
+            "only the Downloads drop should match, not System32"
+        );
     }
 }

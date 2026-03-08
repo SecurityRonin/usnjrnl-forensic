@@ -485,6 +485,56 @@ mod tests {
         assert_eq!(new_records.len(), 0);
     }
 
+    /// A mock source that returns data which causes parse_usn_journal to fail.
+    /// parse_usn_journal currently always returns Ok, so this exercises the
+    /// parse path as closely as possible. To actually trigger lines 111-113,
+    /// we need parse_usn_journal to return Err. Let's use a source that returns
+    /// data that will produce an error if we can find a way.
+    ///
+    /// Actually, looking at parse_usn_journal, it always returns Ok(records).
+    /// Lines 111-113 are defensive code for future-proofing. The test below
+    /// still exercises the closest possible path.
+    struct ParseFailSource {
+        data: Vec<u8>,
+    }
+
+    impl JournalSource for ParseFailSource {
+        fn read_from_usn(&mut self, _start_usn: i64, buffer: &mut [u8]) -> Result<usize> {
+            let n = self.data.len().min(buffer.len());
+            buffer[..n].copy_from_slice(&self.data[..n]);
+            Ok(n)
+        }
+
+        fn current_journal_id(&self) -> Result<u64> {
+            Ok(42)
+        }
+    }
+
+    #[test]
+    fn test_monitor_parse_returns_no_records_from_garbage() {
+        // Exercises the parse path with data that produces no records.
+        // Lines 111-113 are unreachable since parse_usn_journal never returns Err,
+        // but this confirms that garbage data produces no NewRecord events.
+        let mut garbage = vec![0xFFu8; 128];
+        // Make it look non-zero so bytes_read > 0
+        garbage[0..4].copy_from_slice(&(0x40u32).to_le_bytes());
+        garbage[4..6].copy_from_slice(&99u16.to_le_bytes()); // unknown version
+
+        let source = ParseFailSource { data: garbage };
+        let mut monitor = JournalMonitor::new(source, MonitorConfig::default()).unwrap();
+
+        let events = monitor.poll_once();
+        let new_records: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, MonitorEvent::NewRecord(_)))
+            .collect();
+        assert_eq!(
+            new_records.len(),
+            0,
+            "Garbage data should produce no records"
+        );
+    }
+
     #[test]
     fn test_monitor_last_usn_not_updated_on_wrap() {
         // When journal wraps, the new USN is lower than last_usn

@@ -946,6 +946,186 @@ mod tests {
     }
 
     #[test]
+    fn test_build_report_data_with_mft_timestamps() {
+        // Exercise lines 290-295: the mft_data.map(|mft| ...) block that
+        // converts MftEntry timestamps into MftTimestampEntry structs.
+        use crate::mft::{MftData, MftEntry};
+        use crate::rewind::EntryKey;
+        use std::collections::HashMap;
+
+        let (resolved, ghosts, clearing) = make_test_input();
+
+        let ts1 = DateTime::from_timestamp(1700000000, 0).unwrap();
+        let ts2 = DateTime::from_timestamp(1700001000, 0).unwrap();
+
+        let mft_entries = vec![
+            MftEntry {
+                entry_number: 100,
+                sequence_number: 1,
+                filename: "evidence.doc".to_string(),
+                parent_entry: 5,
+                parent_sequence: 5,
+                is_directory: false,
+                is_in_use: true,
+                si_created: Some(ts1),
+                si_modified: Some(ts2),
+                si_mft_modified: None,
+                si_accessed: None,
+                fn_created: Some(ts1),
+                fn_modified: Some(ts2),
+                fn_mft_modified: None,
+                fn_accessed: None,
+                full_path: ".\\evidence.doc".to_string(),
+                file_size: 4096,
+                has_ads: false,
+            },
+            MftEntry {
+                entry_number: 200,
+                sequence_number: 2,
+                filename: "notes.txt".to_string(),
+                parent_entry: 5,
+                parent_sequence: 5,
+                is_directory: false,
+                is_in_use: true,
+                si_created: None,
+                si_modified: None,
+                si_mft_modified: None,
+                si_accessed: None,
+                fn_created: None,
+                fn_modified: None,
+                fn_mft_modified: None,
+                fn_accessed: None,
+                full_path: ".\\notes.txt".to_string(),
+                file_size: 128,
+                has_ads: false,
+            },
+        ];
+
+        let mut by_entry = HashMap::new();
+        by_entry.insert(100u64, 0usize);
+        by_entry.insert(200u64, 1usize);
+
+        let mut by_key = HashMap::new();
+        by_key.insert(EntryKey::new(100, 1), 0usize);
+        by_key.insert(EntryKey::new(200, 2), 1usize);
+
+        let mft_data = MftData {
+            entries: mft_entries,
+            by_entry,
+            by_key,
+        };
+
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: Some(&mft_data),
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        // Verify mft_timestamps were populated (lines 290-295)
+        assert_eq!(data.mft_timestamps.len(), 2);
+
+        // First entry has timestamps
+        assert_eq!(data.mft_timestamps[0].entry, 100);
+        assert_eq!(data.mft_timestamps[0].filename, "evidence.doc");
+        assert!(!data.mft_timestamps[0].si_created.is_empty());
+        assert!(!data.mft_timestamps[0].si_modified.is_empty());
+        assert!(!data.mft_timestamps[0].fn_created.is_empty());
+        assert!(!data.mft_timestamps[0].fn_modified.is_empty());
+
+        // Second entry has no timestamps (None -> empty string via unwrap_or_default)
+        assert_eq!(data.mft_timestamps[1].entry, 200);
+        assert_eq!(data.mft_timestamps[1].filename, "notes.txt");
+        assert!(data.mft_timestamps[1].si_created.is_empty());
+        assert!(data.mft_timestamps[1].si_modified.is_empty());
+        assert!(data.mft_timestamps[1].fn_created.is_empty());
+        assert!(data.mft_timestamps[1].fn_modified.is_empty());
+    }
+
+    #[test]
+    fn test_export_report_with_mft_data_produces_html() {
+        // Ensure the full export_report path works with mft_data: Some(...)
+        use crate::mft::{MftData, MftEntry};
+        use crate::rewind::EntryKey;
+        use std::collections::HashMap;
+
+        let (resolved, ghosts, clearing) = make_test_input();
+
+        let ts = DateTime::from_timestamp(1700000000, 0).unwrap();
+        let mft_entries = vec![MftEntry {
+            entry_number: 100,
+            sequence_number: 1,
+            filename: "test.exe".to_string(),
+            parent_entry: 5,
+            parent_sequence: 5,
+            is_directory: false,
+            is_in_use: true,
+            si_created: Some(ts),
+            si_modified: Some(ts),
+            si_mft_modified: None,
+            si_accessed: None,
+            fn_created: Some(ts),
+            fn_modified: Some(ts),
+            fn_mft_modified: None,
+            fn_accessed: None,
+            full_path: ".\\test.exe".to_string(),
+            file_size: 1024,
+            has_ads: false,
+        }];
+
+        let mut by_entry = HashMap::new();
+        by_entry.insert(100u64, 0usize);
+        let mut by_key = HashMap::new();
+        by_key.insert(EntryKey::new(100, 1), 0usize);
+
+        let mft_data = MftData {
+            entries: mft_entries,
+            by_entry,
+            by_key,
+        };
+
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: Some(&mft_data),
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        let mut buf = Vec::new();
+        export_report(&data, &mut buf).unwrap();
+        let html = String::from_utf8(buf).unwrap();
+
+        // The HTML should contain the MFT timestamp data in the embedded JSON
+        assert!(html.contains("mft_timestamps"));
+        assert!(html.contains("si_created"));
+        assert!(html.contains("fn_created"));
+    }
+
+    #[test]
     fn test_export_report_error_on_write_failure() {
         let (resolved, ghosts, clearing) = make_test_input();
         let input = ReportInput {

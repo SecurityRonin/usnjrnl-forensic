@@ -182,4 +182,24 @@ mod tests {
         assert!(output.contains("1234567890|USN|||USN:"));
         assert!(output.contains(".\\root\\data.bin"));
     }
+
+    #[test]
+    fn test_tln_writeln_format_exact_line() {
+        // Directly exercise the writeln! on line 18 and verify exact output format.
+        // Uses a BufWriter to ensure the write path through write_fmt is fully covered.
+        let resolved = vec![make_record(
+            "payload.dll",
+            ".\\Windows\\System32\\payload.dll",
+            ".\\Windows\\System32",
+            1600000000,
+            UsnReason::FILE_DELETE,
+        )];
+        let mut buf = std::io::BufWriter::new(Vec::new());
+        export_tln(&resolved, &mut buf).unwrap();
+        let output = String::from_utf8(buf.into_inner().unwrap()).unwrap();
+        assert_eq!(
+            output.trim(),
+            "1600000000|USN|||USN: FILE_DELETE .\\Windows\\System32\\payload.dll"
+        );
+    }
 }

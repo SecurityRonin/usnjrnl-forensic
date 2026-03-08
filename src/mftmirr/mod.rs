@@ -283,4 +283,31 @@ mod tests {
         assert!(!result.matches[0]);
         assert_eq!(result.diff_offsets[0].len(), 1);
     }
+
+    #[test]
+    fn test_warn_format_args_evaluated_for_all_entries() {
+        // Covers lines 47-48, 68, 70-71 with warn-level logging enabled.
+        // Exercises BOTH warn paths:
+        // 1. Insufficient data warn for entries 2-3
+        // 2. Diff warn for entry 0
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Warn)
+            .is_test(true)
+            .try_init();
+
+        let mft = vec![0xAAu8; MFT_ENTRY_SIZE * MIRROR_ENTRY_COUNT];
+        let mut mirr = vec![0xAAu8; MFT_ENTRY_SIZE * 2]; // Only 2 entries
+        mirr[0] = 0xBB; // Also make entry 0 differ
+
+        let result = compare_mft_mirror(&mft, &mirr).unwrap();
+        assert!(!result.is_consistent);
+        // Entry 0: differs (exercises lines 68, 70-71 warn)
+        assert!(!result.matches[0]);
+        assert!(!result.diff_offsets[0].is_empty());
+        // Entry 1: matches
+        assert!(result.matches[1]);
+        // Entries 2-3: insufficient data (exercises lines 47-48 warn)
+        assert!(!result.matches[2]);
+        assert!(!result.matches[3]);
+    }
 }

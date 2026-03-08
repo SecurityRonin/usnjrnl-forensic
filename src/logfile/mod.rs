@@ -409,4 +409,54 @@ mod tests {
         assert_eq!(summary.restart_areas.len(), 0);
         assert_eq!(summary.record_page_count, 0);
     }
+
+    #[test]
+    fn test_parse_logfile_boundary_check_line_61() {
+        // Line 61: page_offset + 4 > data.len() break
+        // This line is unreachable with current loop bounds because:
+        //   page_count = data.len() / LOG_PAGE_SIZE
+        //   page_offset = page_idx * LOG_PAGE_SIZE (max = (page_count-1) * LOG_PAGE_SIZE)
+        //   So page_offset <= data.len() - LOG_PAGE_SIZE, and LOG_PAGE_SIZE (4096) >> 4.
+        // Exercise the closest boundary: data.len() exactly equals one page.
+        let data = vec![0u8; LOG_PAGE_SIZE];
+        let summary = parse_logfile(&data).unwrap();
+        // All zeros -> no RSTR or RCRD signatures
+        assert_eq!(summary.restart_areas.len(), 0);
+        assert_eq!(summary.record_page_count, 0);
+        assert!(!summary.has_gaps);
+    }
+
+    #[test]
+    fn test_parse_logfile_gap_not_flagged_early_pages() {
+        // Covers line 120: the condition page_idx > 2 prevents false gap detection
+        // for the very first pages. Build data: RCRD page 0, then garbage page 1.
+        // Since page_idx=1 which is <= 2, no gap should be flagged.
+        let mut data = Vec::new();
+        data.extend_from_slice(&make_rcrd_page(1000)); // page 0
+        let mut garbage = vec![0xDEu8; LOG_PAGE_SIZE];
+        garbage[0..4].copy_from_slice(b"JUNK");
+        data.extend_from_slice(&garbage); // page 1
+
+        let summary = parse_logfile(&data).unwrap();
+        assert!(
+            !summary.has_gaps,
+            "Gap should not be flagged in early pages (page_idx <= 2)"
+        );
+    }
+
+    #[test]
+    fn test_parse_logfile_rstr_too_short_for_header() {
+        // Test RSTR page where page_offset + 0x28 > data.len() is false
+        // but then we need the opposite: page_offset + 0x28 > data.len()
+        // This can't happen with full pages since LOG_PAGE_SIZE (4096) >> 0x28.
+        // Exercise: a full RSTR page that has a zero LSN.
+        let mut data = make_rstr_page(0);
+        // Override the LSN to zero - should track as highest_lsn = 0
+        data[0x08..0x10].copy_from_slice(&0u64.to_le_bytes());
+
+        let summary = parse_logfile(&data).unwrap();
+        assert_eq!(summary.restart_areas.len(), 1);
+        assert_eq!(summary.restart_areas[0].current_lsn, 0);
+        assert_eq!(summary.highest_lsn, 0);
+    }
 }

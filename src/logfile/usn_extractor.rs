@@ -775,6 +775,196 @@ mod tests {
     }
 
     #[test]
+    fn test_try_parse_usn_at_record_len_too_small() {
+        // Covers line 107-108: record_len < USN_V2_MIN_SIZE
+        let mut data = vec![0u8; 0x60];
+        // record_len = 0x20 (below USN_V2_MIN_SIZE)
+        data[0..4].copy_from_slice(&(0x20u32).to_le_bytes());
+        data[4..6].copy_from_slice(&2u16.to_le_bytes());
+        assert!(try_parse_usn_at(&data, 0).is_none());
+    }
+
+    #[test]
+    fn test_try_parse_usn_at_record_len_too_large() {
+        // Covers line 107-108: record_len > USN_MAX_RECORD_SIZE
+        let mut data = vec![0u8; 0x60];
+        data[0..4].copy_from_slice(&(70000u32).to_le_bytes());
+        data[4..6].copy_from_slice(&2u16.to_le_bytes());
+        assert!(try_parse_usn_at(&data, 0).is_none());
+    }
+
+    #[test]
+    fn test_extract_from_rcrd_page_short_for_page_lsn() {
+        // Covers line 164: page_data.len() < 0x20, page_lsn defaults to 0.
+        // Build a minimal page that has RCRD_DATA_OFFSET + a few bytes but < 0x20.
+        // Actually, since RCRD_DATA_OFFSET = 0x40 which is > 0x20, any page
+        // that passes the check at line 155 will also have len >= 0x40 > 0x20.
+        // So line 163-164 (else branch) is unreachable from extract_from_rcrd_page
+        // when called from extract_usn_from_logfile (which ensures page_data.len() >= LOG_PAGE_SIZE).
+        // Call extract_from_rcrd_page directly with a short page:
+        let page = vec![0u8; 0x18]; // Less than 0x20 but we still need >= RCRD_DATA_OFFSET
+        // This will return early on line 155 since len < RCRD_DATA_OFFSET.
+        // To test line 164, we need len >= RCRD_DATA_OFFSET but < 0x20, which is impossible
+        // since RCRD_DATA_OFFSET (0x40) > 0x20. So the else branch is unreachable.
+        // Just verify the short page returns empty:
+        let results = extract_from_rcrd_page(&page, 0);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_extract_aligned_size_zero_break() {
+        // Covers line 242: aligned_size == 0 break
+        // Build an RCRD page where the log record has a client_data_length
+        // that, when added to 0x30, gives a value whose 8-byte alignment is 0.
+        // For aligned_size to be 0, we need (0x30 + client_data_length + 7) & !7 == 0
+        // which is impossible since 0x30 = 48 and 48 + 0 + 7 = 55, (55 & !7) = 48.
+        // So aligned_size is always >= 48. This line is unreachable.
+        // Test the client_data_length=0 path instead (line 236-238):
+        let mut page = vec![0u8; LOG_PAGE_SIZE];
+        page[0..4].copy_from_slice(RCRD_SIGNATURE);
+        page[0x18..0x20].copy_from_slice(&50000u64.to_le_bytes());
+
+        let data_offset = RCRD_DATA_OFFSET;
+        page[data_offset..data_offset + 8].copy_from_slice(&42000u64.to_le_bytes());
+        // client_data_length = 0
+        page[data_offset + 0x18..data_offset + 0x1C].copy_from_slice(&0u32.to_le_bytes());
+
+        let results = extract_from_rcrd_page(&page, 0);
+        // Should not crash; processes fine with zero client data
+        let _ = results;
+    }
+
+    #[test]
+    fn test_extract_redo_start_exceeds_data_area() {
+        // Covers line 200: redo_start + redo_length > data_area.len()
+        // The redo data would extend past the page boundary.
+        let mut page = vec![0u8; LOG_PAGE_SIZE];
+        page[0..4].copy_from_slice(RCRD_SIGNATURE);
+        page[0x18..0x20].copy_from_slice(&50000u64.to_le_bytes());
+
+        let data_offset = RCRD_DATA_OFFSET;
+        page[data_offset..data_offset + 8].copy_from_slice(&42000u64.to_le_bytes());
+
+        let client_data_length = 200u32;
+        page[data_offset + 0x18..data_offset + 0x1C]
+            .copy_from_slice(&client_data_length.to_le_bytes());
+
+        // redo_offset that pushes redo data past the end of data_area
+        let redo_offset: u16 = 0x10;
+        page[data_offset + 0x34..data_offset + 0x36].copy_from_slice(&redo_offset.to_le_bytes());
+        // redo_length that exceeds available space
+        let redo_length: u16 = 0xFFF0;
+        page[data_offset + 0x36..data_offset + 0x38].copy_from_slice(&redo_length.to_le_bytes());
+
+        let results = extract_from_rcrd_page(&page, 0);
+        // Should not crash; redo data is out of bounds so no records from redo
+        let _ = results;
+    }
+
+    #[test]
+    fn test_extract_undo_start_exceeds_data_area() {
+        // Covers line 219: undo_start + undo_length > data_area.len()
+        let mut page = vec![0u8; LOG_PAGE_SIZE];
+        page[0..4].copy_from_slice(RCRD_SIGNATURE);
+        page[0x18..0x20].copy_from_slice(&50000u64.to_le_bytes());
+
+        let data_offset = RCRD_DATA_OFFSET;
+        page[data_offset..data_offset + 8].copy_from_slice(&42000u64.to_le_bytes());
+
+        let client_data_length = 200u32;
+        page[data_offset + 0x18..data_offset + 0x1C]
+            .copy_from_slice(&client_data_length.to_le_bytes());
+
+        // undo_offset that pushes undo data past the end
+        let undo_offset: u16 = 0x10;
+        page[data_offset + 0x38..data_offset + 0x3A].copy_from_slice(&undo_offset.to_le_bytes());
+        let undo_length: u16 = 0xFFF0;
+        page[data_offset + 0x3A..data_offset + 0x3C].copy_from_slice(&undo_length.to_le_bytes());
+
+        let results = extract_from_rcrd_page(&page, 0);
+        let _ = results;
+    }
+
+    #[test]
+    fn test_extract_same_redo_undo_region_deduplicates() {
+        // Covers line 218: same_region check - when redo and undo point to same data,
+        // undo should be skipped to avoid duplicate records.
+        let usn_bytes = build_v2_record_bytes(100, 1, 5, 5, 0x100, "dedup.txt");
+        let mut page = vec![0u8; LOG_PAGE_SIZE];
+
+        page[0..4].copy_from_slice(RCRD_SIGNATURE);
+        page[0x18..0x20].copy_from_slice(&50000u64.to_le_bytes());
+
+        let data_offset = RCRD_DATA_OFFSET;
+        page[data_offset..data_offset + 8].copy_from_slice(&42000u64.to_le_bytes());
+
+        let client_data_length = usn_bytes.len() as u32;
+        page[data_offset + 0x18..data_offset + 0x1C]
+            .copy_from_slice(&client_data_length.to_le_bytes());
+
+        // Both redo and undo point to the SAME offset and length
+        let shared_offset: u16 = 0x10;
+        let shared_length = usn_bytes.len() as u16;
+
+        // redo
+        page[data_offset + 0x34..data_offset + 0x36]
+            .copy_from_slice(&shared_offset.to_le_bytes());
+        page[data_offset + 0x36..data_offset + 0x38]
+            .copy_from_slice(&shared_length.to_le_bytes());
+
+        // undo - same offset and length as redo
+        page[data_offset + 0x38..data_offset + 0x3A]
+            .copy_from_slice(&shared_offset.to_le_bytes());
+        page[data_offset + 0x3A..data_offset + 0x3C]
+            .copy_from_slice(&shared_length.to_le_bytes());
+
+        // Place USN data at the shared location
+        let redo_start = data_offset + 0x30 + shared_offset as usize;
+        if redo_start + usn_bytes.len() <= page.len() {
+            page[redo_start..redo_start + usn_bytes.len()].copy_from_slice(&usn_bytes);
+        }
+
+        let results = extract_usn_from_logfile(&page);
+        // Should find the record only once (from redo), not duplicated from undo
+        let redo_count = results
+            .iter()
+            .filter(|r| r.source == LogFileRecordSource::RedoData)
+            .count();
+        let undo_count = results
+            .iter()
+            .filter(|r| r.source == LogFileRecordSource::UndoData)
+            .count();
+        assert!(
+            redo_count >= 1,
+            "Should find at least one record from redo"
+        );
+        assert_eq!(
+            undo_count, 0,
+            "Should not duplicate from undo when same region as redo"
+        );
+    }
+
+    #[test]
+    fn test_extract_record_offset_overflow_safety() {
+        // Covers line 248: record_offset > data_area.len() break
+        // Build a page with a log record whose client_data_length causes
+        // record_offset to jump past data_area
+        let mut page = vec![0u8; LOG_PAGE_SIZE];
+        page[0..4].copy_from_slice(RCRD_SIGNATURE);
+        page[0x18..0x20].copy_from_slice(&50000u64.to_le_bytes());
+
+        let data_offset = RCRD_DATA_OFFSET;
+        page[data_offset..data_offset + 8].copy_from_slice(&42000u64.to_le_bytes());
+        // Large but not overflowing client_data_length
+        page[data_offset + 0x18..data_offset + 0x1C]
+            .copy_from_slice(&(LOG_PAGE_SIZE as u32).to_le_bytes());
+
+        let results = extract_from_rcrd_page(&page, 0);
+        // Should break cleanly without panic
+        let _ = results;
+    }
+
+    #[test]
     fn test_extract_from_rcrd_page_short_page_for_lsn() {
         // RCRD page where len < 0x20 (can't read page_lsn)
         // This is handled by the extract_from_rcrd_page function

@@ -9,9 +9,21 @@ Assessment of `usnjrnl-forensic --report` triage accuracy against the **Szechuan
 | Platform | MacBook Pro, Apple M4, macOS Darwin 24.6.0 |
 | usnjrnl-forensic | v0.6.0 (release build, `--features image`) |
 | Image | `20200918_0417_DESKTOP-SDN1RPT.E01` (15.0 GiB, EWF v1) |
-| USN records | 43,463 allocated + 191 ghost ($LogFile) = 43,654 total |
-| MFT entries | 104,383 |
-| Wall-clock time | **4.0 seconds** (image open, artifact extraction, parsing, rewind, triage, HTML report) |
+| USN records | 43,463 allocated + 191 ghost ($LogFile) + 12,000+ carved = ~56,000 total |
+| MFT entries | 104,383 allocated + carved entries from unallocated space |
+| Wall-clock time | **35 seconds** total (see breakdown below) |
+
+**Timing breakdown** (Apple M4, release build):
+
+| Phase | Time |
+|-------|------|
+| Image open + artifact extraction | <1 s |
+| Parse $UsnJrnl + $MFT + $LogFile | <1 s |
+| Rewind path reconstruction | <1 s |
+| Triage (12 IR questions) + HTML report | <1 s |
+| **Subtotal without carving** | **~4 s** |
+| Carve unallocated space (14.7 GB partition, 4 MB chunks) | ~31 s |
+| **Total with `--carve-unallocated`** | **~35 s** |
 
 ## Reference Sources
 
@@ -182,9 +194,9 @@ The triage report surface-level hit counts include noise, but the underlying rec
 
 | Metric | usnjrnl-forensic --report | Manual DFIR (per writeups) |
 |---|---|---|
-| **Time to first findings** | **4 seconds** | 4-8 hours (typical CTF solve time) |
+| **Time to first findings** | **35 seconds** (4 s without carving) | 4-8 hours (typical CTF solve time) |
 | **Tools required** | 1 binary | 6-10 tools (Volatility, Wireshark, FTK, Registry Explorer, Event Log Explorer, etc.) |
-| **Artifacts analyzed** | USN journal + MFT + $LogFile | Memory dumps, disk images, PCAP, event logs, registry hives |
+| **Artifacts analyzed** | USN journal + MFT + $LogFile + unallocated carving | Memory dumps, disk images, PCAP, event logs, registry hives |
 | **Attack timeline coverage** | Partial (USN journal scope) | Complete (all artifact types) |
 | **Malware identification** | Filename + path + behavior pattern | Hash, sandbox analysis, VirusTotal |
 | **Lateral movement detection** | Not possible (data source limitation) | Yes (PCAP + event logs) |
@@ -201,6 +213,8 @@ The triage report surface-level hit counts include noise, but the underlying rec
 
 ## Conclusion
 
-In **4 seconds** on an Apple M4, `usnjrnl-forensic --report` correctly identifies the malware delivery (coreupdater.exe via Edge download), deployment to System32, execution (Prefetch), data staging (loot.zip), credential-relevant hive access, and 191 recovered ghost records — covering the core attack narrative that took CTF participants hours to reconstruct manually across multiple tools.
+In **35 seconds** on an Apple M4, `usnjrnl-forensic --report --carve-unallocated` opens a 15 GiB E01 image, extracts and parses all NTFS artifacts, reconstructs full file paths via journal rewind, carves 14.7 GB of unallocated space recovering 12,000+ deleted records, answers 12 incident response questions, and generates an interactive HTML report. Without carving, the same pipeline completes in ~4 seconds.
 
-The automated triage is not a replacement for full-spectrum DFIR. It is a **4-second head start** that tells the incident commander: malware was deployed, it executed, data was staged for theft, and credentials may be compromised — before the analyst has opened their first tool.
+The triage correctly identifies the malware delivery (coreupdater.exe via Edge download), deployment to System32, execution (Prefetch), data staging (loot.zip), credential-relevant hive access, and 191 recovered ghost records — covering the core attack narrative that took CTF participants hours to reconstruct manually across multiple tools.
+
+The automated triage is not a replacement for full-spectrum DFIR. It is a **35-second head start** that tells the incident commander: malware was deployed, it executed, data was staged for theft, and credentials may be compromised — before the analyst has opened their first tool.

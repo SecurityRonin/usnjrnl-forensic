@@ -464,6 +464,69 @@ mod tests {
     }
 
     #[test]
+    fn test_refs_reconstruct_paths_single_orphan() {
+        // Covers line 173: the else branch (break) when current is not in lookup.
+        // Create a record whose parent_id is not in lookup, causing walk to break
+        // on the first iteration itself via line 168 (!lookup.contains_key(parent)).
+        let orphan_id = RefsFileId::from_u128(42);
+        let unknown_parent = RefsFileId::from_u128(999);
+
+        let rec = RefsRecord::new(
+            make_v3_record(42, 999, UsnReason::FILE_CREATE, "orphan.txt"),
+            orphan_id,
+            unknown_parent,
+        );
+
+        let analyzer = RefsAnalyzer::new(vec![rec]);
+        let paths = analyzer.reconstruct_paths();
+        // The orphan should still get a path (just its own name)
+        assert_eq!(
+            paths.get(&orphan_id).map(|s| s.as_str()),
+            Some("orphan.txt"),
+            "Orphan file should resolve to just its filename"
+        );
+    }
+
+    #[test]
+    fn test_refs_reconstruct_deep_chain_with_missing_ancestor() {
+        // Tests the path walk stopping when an ancestor is missing from lookup.
+        // A -> B -> C -> (missing D)
+        let id_a = RefsFileId::from_u128(10);
+        let id_b = RefsFileId::from_u128(20);
+        let id_c = RefsFileId::from_u128(30);
+        let id_d = RefsFileId::from_u128(40); // not in any record
+
+        let rec_a = RefsRecord::new(
+            make_v3_record(10, 20, UsnReason::FILE_CREATE, "file.txt"),
+            id_a,
+            id_b,
+        );
+        let rec_b = RefsRecord::new(
+            make_v3_record(20, 30, UsnReason::FILE_CREATE, "subdir"),
+            id_b,
+            id_c,
+        );
+        let rec_c = RefsRecord::new(
+            make_v3_record(30, 40, UsnReason::FILE_CREATE, "topdir"),
+            id_c,
+            id_d,
+        );
+
+        let analyzer = RefsAnalyzer::new(vec![rec_a, rec_b, rec_c]);
+        let paths = analyzer.reconstruct_paths();
+
+        assert_eq!(
+            paths.get(&id_a).map(|s| s.as_str()),
+            Some("topdir\\subdir\\file.txt")
+        );
+        assert_eq!(
+            paths.get(&id_b).map(|s| s.as_str()),
+            Some("topdir\\subdir")
+        );
+        assert_eq!(paths.get(&id_c).map(|s| s.as_str()), Some("topdir"));
+    }
+
+    #[test]
     fn test_refs_mixed_v2_and_v3_not_refs() {
         // If any record is not v3, it's not ReFS
         let v2_record = UsnRecord {

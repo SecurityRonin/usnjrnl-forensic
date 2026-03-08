@@ -96,8 +96,10 @@ struct ArtifactPaths {
 
 fn main() -> Result<()> {
     env_logger::init();
-    let cli = Cli::parse();
+    run(Cli::parse())
+}
 
+fn run(cli: Cli) -> Result<()> {
     // ─── Validate CLI constraints ────────────────────────────────────────────
 
     if cli.output_dir.is_some() && cli.image.is_none() {
@@ -714,49 +716,7 @@ fn perform_carving(
 }
 
 fn print_reason_stats(records: &[usn::UsnRecord]) {
-    use std::collections::HashMap;
-
-    let mut reason_counts: HashMap<&str, usize> = HashMap::new();
-    let mut v2_count = 0usize;
-    let mut v3_count = 0usize;
-
-    for r in records {
-        match r.major_version {
-            2 => v2_count += 1,
-            3 => v3_count += 1,
-            _ => {}
-        }
-
-        if r.reason.contains(usn::UsnReason::FILE_CREATE) {
-            *reason_counts.entry("FILE_CREATE").or_default() += 1;
-        }
-        if r.reason.contains(usn::UsnReason::FILE_DELETE) {
-            *reason_counts.entry("FILE_DELETE").or_default() += 1;
-        }
-        if r.reason.contains(usn::UsnReason::RENAME_OLD_NAME) {
-            *reason_counts.entry("RENAME").or_default() += 1;
-        }
-        if r.reason.contains(usn::UsnReason::DATA_OVERWRITE) {
-            *reason_counts.entry("DATA_OVERWRITE").or_default() += 1;
-        }
-        if r.reason.contains(usn::UsnReason::DATA_EXTEND) {
-            *reason_counts.entry("DATA_EXTEND").or_default() += 1;
-        }
-        if r.reason.contains(usn::UsnReason::SECURITY_CHANGE) {
-            *reason_counts.entry("SECURITY_CHANGE").or_default() += 1;
-        }
-        if r.reason.contains(usn::UsnReason::BASIC_INFO_CHANGE) {
-            *reason_counts.entry("BASIC_INFO_CHANGE").or_default() += 1;
-        }
-    }
-
-    eprintln!("[*] Record versions: V2={v2_count}, V3={v3_count}");
-    eprintln!("[*] Reason breakdown:");
-    let mut sorted: Vec<_> = reason_counts.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    for (reason, count) in sorted {
-        eprintln!("    {reason}: {count}");
-    }
+    usnjrnl_forensic::output::stats::write_reason_stats(records, &mut std::io::stderr()).ok();
 }
 
 #[cfg(test)]
@@ -933,5 +893,544 @@ mod tests {
         .unwrap();
         assert!(cli.csv.is_some());
         assert!(cli.report.is_some());
+    }
+
+    // ─── Pipeline integration tests ──────────────────────────────────────
+
+    /// Build a minimal USN V2 record in binary format.
+    fn build_v2_record_bytes(
+        entry: u64,
+        seq: u16,
+        parent: u64,
+        parent_seq: u16,
+        usn_offset: i64,
+        reason: u32,
+        name: &str,
+    ) -> Vec<u8> {
+        let name_utf16: Vec<u16> = name.encode_utf16().collect();
+        let name_bytes_len = name_utf16.len() * 2;
+        let record_len = 0x3C + name_bytes_len;
+        let aligned_len = (record_len + 7) & !7;
+        let mut buf = vec![0u8; aligned_len];
+        buf[0..4].copy_from_slice(&(record_len as u32).to_le_bytes());
+        buf[4..6].copy_from_slice(&2u16.to_le_bytes());
+        let file_ref = entry | ((seq as u64) << 48);
+        buf[0x08..0x10].copy_from_slice(&file_ref.to_le_bytes());
+        let parent_ref = parent | ((parent_seq as u64) << 48);
+        buf[0x10..0x18].copy_from_slice(&parent_ref.to_le_bytes());
+        buf[0x18..0x20].copy_from_slice(&usn_offset.to_le_bytes());
+        let ts: i64 = 133_500_480_000_000_000;
+        buf[0x20..0x28].copy_from_slice(&ts.to_le_bytes());
+        buf[0x28..0x2C].copy_from_slice(&reason.to_le_bytes());
+        buf[0x34..0x38].copy_from_slice(&0x20u32.to_le_bytes());
+        buf[0x38..0x3A].copy_from_slice(&(name_bytes_len as u16).to_le_bytes());
+        buf[0x3A..0x3C].copy_from_slice(&0x3Cu16.to_le_bytes());
+        for (i, &ch) in name_utf16.iter().enumerate() {
+            let off = 0x3C + i * 2;
+            buf[off..off + 2].copy_from_slice(&ch.to_le_bytes());
+        }
+        buf
+    }
+
+    /// Create a synthetic $UsnJrnl:$J file with known records.
+    fn create_synthetic_journal(dir: &std::path::Path) -> PathBuf {
+        let mut data = Vec::new();
+        data.extend_from_slice(&build_v2_record_bytes(
+            100, 1, 5, 1, 1000, 0x100, "test.txt",
+        ));
+        data.extend_from_slice(&build_v2_record_bytes(
+            100, 1, 5, 1, 2000, 0x02, "test.txt",
+        ));
+        data.extend_from_slice(&build_v2_record_bytes(
+            200, 1, 5, 1, 3000, 0x200, "old.log",
+        ));
+        data.extend_from_slice(&build_v2_record_bytes(
+            300, 1, 5, 1, 4000, 0x1000, "moved.exe",
+        ));
+        data.extend_from_slice(&build_v2_record_bytes(
+            400, 1, 5, 1, 5000, 0x800 | 0x8000, "secure.dll",
+        ));
+        let path = dir.join("$UsnJrnl");
+        std::fs::write(&path, &data).unwrap();
+        path
+    }
+
+    /// Build a minimal valid 1024-byte MFT FILE entry (mostly zeros).
+    /// The `mft` crate needs `total_entry_size` (offset 0x1C) != 0 to avoid
+    /// divide-by-zero in `MftParser::from_buffer`.
+    fn build_mft_entry_bytes() -> Vec<u8> {
+        let mut entry = vec![0u8; 1024];
+        // "FILE" signature
+        entry[0..4].copy_from_slice(b"FILE");
+        // USA offset = 0x30
+        entry[4..6].copy_from_slice(&0x0030u16.to_le_bytes());
+        // USA size = 3 (1 fixup value + 2 sector fixup entries)
+        entry[6..8].copy_from_slice(&0x0003u16.to_le_bytes());
+        // Sequence number = 1 at offset 0x10
+        entry[0x10..0x12].copy_from_slice(&1u16.to_le_bytes());
+        // First attribute offset = 0x38 at offset 0x14
+        entry[0x14..0x16].copy_from_slice(&0x0038u16.to_le_bytes());
+        // Flags = 0x01 (IN_USE) at offset 0x16
+        entry[0x16..0x18].copy_from_slice(&0x0001u16.to_le_bytes());
+        // Used entry size at offset 0x18
+        entry[0x18..0x1C].copy_from_slice(&0x0040u32.to_le_bytes());
+        // Total entry size = 1024 at offset 0x1C (CRITICAL)
+        entry[0x1C..0x20].copy_from_slice(&0x0400u32.to_le_bytes());
+        // End-of-attributes marker at first attribute offset
+        entry[0x38..0x3C].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        // USA and sector endings are all zeros → fixups match trivially
+        entry
+    }
+
+    /// Create a minimal $MFT with one valid FILE entry (rest are zero entries).
+    fn create_synthetic_mft(dir: &std::path::Path) -> PathBuf {
+        let mut data = build_mft_entry_bytes();
+        // Pad with 3 more zero entries (4096 total = 4 × 1024)
+        data.resize(4 * 1024, 0);
+        let path = dir.join("$MFT");
+        std::fs::write(&path, &data).unwrap();
+        path
+    }
+
+    /// Create a minimal $MFTMirr matching the synthetic MFT.
+    /// If `tampered`, one byte in the first entry differs.
+    fn create_synthetic_mftmirr(dir: &std::path::Path, tampered: bool) -> PathBuf {
+        let mut data = build_mft_entry_bytes();
+        data.resize(4 * 1024, 0);
+        if tampered {
+            // Flip a byte inside the first entry (but not the header fields
+            // that would break parsing) to trigger mismatch detection
+            data[0x100] = 0xFF;
+        }
+        let path = dir.join("$MFTMirr");
+        std::fs::write(&path, &data).unwrap();
+        path
+    }
+
+    /// Create a minimal $LogFile (no RCRD pages → empty extraction).
+    fn create_synthetic_logfile(dir: &std::path::Path) -> PathBuf {
+        let data = vec![0u8; 2 * 4096];
+        let path = dir.join("$LogFile");
+        std::fs::write(&path, &data).unwrap();
+        path
+    }
+
+    /// Create a $LogFile with an RCRD page containing a ghost USN record.
+    fn create_logfile_with_ghost(dir: &std::path::Path) -> PathBuf {
+        let mut data = vec![0u8; 4096];
+        // RCRD page signature
+        data[0..4].copy_from_slice(b"RCRD");
+        // page_lsn at offset 0x18
+        data[0x18..0x20].copy_from_slice(&55555u64.to_le_bytes());
+        // Data area starts at RCRD_DATA_OFFSET (0x40).
+        // Build a fake log record header so extract_from_rcrd_page processes it.
+        let data_offset = 0x40;
+        // this_lsn at record+0x00
+        data[data_offset..data_offset + 8].copy_from_slice(&55555u64.to_le_bytes());
+        // client_data_length at record+0x18
+        let ghost_rec = build_v2_record_bytes(500, 1, 5, 1, 99999, 0x100, "ghost.txt");
+        let ghost_len = ghost_rec.len();
+        data[data_offset + 0x18..data_offset + 0x1C]
+            .copy_from_slice(&(ghost_len as u32).to_le_bytes());
+        // redo_offset at record+0x34 (relative to record+0x30)
+        let redo_rel_offset = 0x10u16; // 16 bytes past record+0x30
+        data[data_offset + 0x34..data_offset + 0x36]
+            .copy_from_slice(&redo_rel_offset.to_le_bytes());
+        // redo_length at record+0x36
+        data[data_offset + 0x36..data_offset + 0x38]
+            .copy_from_slice(&(ghost_len as u16).to_le_bytes());
+        // Place the ghost USN record at record+0x30+redo_offset = record+0x40
+        let ghost_start = data_offset + 0x30 + redo_rel_offset as usize;
+        if ghost_start + ghost_len <= data.len() {
+            data[ghost_start..ghost_start + ghost_len].copy_from_slice(&ghost_rec);
+        }
+        let path = dir.join("$LogFile");
+        std::fs::write(&path, &data).unwrap();
+        path
+    }
+
+    // ─── run() tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_run_csv_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let csv_out = tmp.path().join("out.csv");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--csv",
+            csv_out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let content = std::fs::read_to_string(&csv_out).unwrap();
+        assert!(content.contains("test.txt"));
+        assert!(content.contains("old.log"));
+    }
+
+    #[test]
+    fn test_run_jsonl_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let out = tmp.path().join("out.jsonl");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--jsonl",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let content = std::fs::read_to_string(&out).unwrap();
+        assert!(content.contains("test.txt"));
+    }
+
+    #[test]
+    fn test_run_body_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let out = tmp.path().join("out.body");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--body",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let content = std::fs::read_to_string(&out).unwrap();
+        // bodyfile: 0|path|entry|...
+        assert!(content.contains("test.txt"));
+    }
+
+    #[test]
+    fn test_run_tln_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let out = tmp.path().join("out.tln");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--tln",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let content = std::fs::read_to_string(&out).unwrap();
+        assert!(content.contains("USN"));
+    }
+
+    #[test]
+    fn test_run_xml_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let out = tmp.path().join("out.xml");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--xml",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let content = std::fs::read_to_string(&out).unwrap();
+        assert!(content.contains("<usnjrnl>"));
+        assert!(content.contains("test.txt"));
+    }
+
+    #[test]
+    fn test_run_sqlite_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let out = tmp.path().join("out.db");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--sqlite",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        assert!(out.exists());
+        assert!(std::fs::metadata(&out).unwrap().len() > 0);
+    }
+
+    #[test]
+    fn test_run_report_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let out = tmp.path().join("report.html");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--report",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let content = std::fs::read_to_string(&out).unwrap();
+        assert!(content.contains("<!DOCTYPE html>"));
+        assert!(content.contains("test.txt"));
+    }
+
+    #[test]
+    fn test_run_all_outputs_simultaneously() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--csv",
+            tmp.path().join("o.csv").to_str().unwrap(),
+            "--jsonl",
+            tmp.path().join("o.jsonl").to_str().unwrap(),
+            "--body",
+            tmp.path().join("o.body").to_str().unwrap(),
+            "--tln",
+            tmp.path().join("o.tln").to_str().unwrap(),
+            "--xml",
+            tmp.path().join("o.xml").to_str().unwrap(),
+            "--sqlite",
+            tmp.path().join("o.db").to_str().unwrap(),
+            "--report",
+            tmp.path().join("o.html").to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        assert!(tmp.path().join("o.csv").exists());
+        assert!(tmp.path().join("o.jsonl").exists());
+        assert!(tmp.path().join("o.body").exists());
+        assert!(tmp.path().join("o.tln").exists());
+        assert!(tmp.path().join("o.xml").exists());
+        assert!(tmp.path().join("o.db").exists());
+        assert!(tmp.path().join("o.html").exists());
+    }
+
+    #[test]
+    fn test_run_no_output_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let cli = Cli::try_parse_from(["usnjrnl", "-j", journal.to_str().unwrap()])
+            .unwrap();
+        // Should succeed — just parses and prints stats, no output file written
+        run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_run_with_mft() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let out = tmp.path().join("out.csv");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--csv",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        assert!(out.exists());
+    }
+
+    #[test]
+    fn test_run_with_mft_and_timestomping() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let out = tmp.path().join("out.csv");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--detect-timestomping",
+            "--csv",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_run_with_mftmirr_consistent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let mftmirr = create_synthetic_mftmirr(tmp.path(), false);
+        let out = tmp.path().join("out.csv");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--mftmirr",
+            mftmirr.to_str().unwrap(),
+            "--csv",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_run_with_mftmirr_inconsistent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let mftmirr = create_synthetic_mftmirr(tmp.path(), true);
+        let out = tmp.path().join("out.csv");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--mftmirr",
+            mftmirr.to_str().unwrap(),
+            "--csv",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_run_with_logfile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let logfile = create_synthetic_logfile(tmp.path());
+        let out = tmp.path().join("out.csv");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--logfile",
+            logfile.to_str().unwrap(),
+            "--csv",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_run_with_logfile_ghost_records() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let logfile = create_logfile_with_ghost(tmp.path());
+        let report = tmp.path().join("report.html");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--logfile",
+            logfile.to_str().unwrap(),
+            "--report",
+            report.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        // If ghost records were found, the report should contain them
+        let html = std::fs::read_to_string(&report).unwrap();
+        assert!(html.contains("<!DOCTYPE html>"));
+    }
+
+    #[test]
+    fn test_run_with_report_and_mft() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let mft = create_synthetic_mft(tmp.path());
+        let report = tmp.path().join("report.html");
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "-m",
+            mft.to_str().unwrap(),
+            "--report",
+            report.to_str().unwrap(),
+        ])
+        .unwrap();
+        run(cli).unwrap();
+        let html = std::fs::read_to_string(&report).unwrap();
+        assert!(html.contains("<!DOCTYPE html>"));
+    }
+
+    #[test]
+    fn test_run_validation_output_dir_without_image() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--output-dir",
+            "/tmp/artifacts",
+        ])
+        .unwrap();
+        let result = run(cli);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("--output-dir can only be used with --image")
+        );
+    }
+
+    #[test]
+    fn test_run_validation_carve_without_image() {
+        let tmp = tempfile::tempdir().unwrap();
+        let journal = create_synthetic_journal(tmp.path());
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            journal.to_str().unwrap(),
+            "--carve-unallocated",
+        ])
+        .unwrap();
+        let result = run(cli);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("--carve-unallocated can only be used with --image")
+        );
+    }
+
+    #[test]
+    fn test_run_invalid_journal_path() {
+        let cli = Cli::try_parse_from([
+            "usnjrnl",
+            "-j",
+            "/nonexistent/path/$UsnJrnl",
+            "--csv",
+            "/tmp/out.csv",
+        ])
+        .unwrap();
+        let result = run(cli);
+        assert!(result.is_err());
     }
 }

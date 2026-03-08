@@ -201,4 +201,25 @@ mod tests {
         assert_eq!(fields[9], "1234567890");
         assert_eq!(fields[10], "1234567890");
     }
+
+    #[test]
+    fn test_body_writeln_format_exact_line() {
+        // Directly exercise the writeln! on line 18 and verify exact output format.
+        // Uses a BufWriter to ensure the write path through write_fmt is fully covered.
+        let resolved = vec![make_record(
+            "payload.dll",
+            ".\\Windows\\System32\\payload.dll",
+            ".\\Windows\\System32",
+            42,
+            1600000000,
+            UsnReason::FILE_DELETE | UsnReason::CLOSE,
+        )];
+        let mut buf = std::io::BufWriter::new(Vec::new());
+        export_body(&resolved, &mut buf).unwrap();
+        let output = String::from_utf8(buf.into_inner().unwrap()).unwrap();
+        assert_eq!(
+            output.trim(),
+            "0|.\\Windows\\System32\\payload.dll|42|0|0|0|0|1600000000|1600000000|1600000000|1600000000"
+        );
+    }
 }

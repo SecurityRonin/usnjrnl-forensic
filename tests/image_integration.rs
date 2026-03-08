@@ -459,7 +459,7 @@ fn e2e_full_report_pipeline_szechuan_sauce() {
     assert!(allocated_count > 0, "should have allocated records");
 
     if carved_tagged > 0 {
-        let carved_count = data.records.iter().filter(|r| r.source == "carved").count();
+        let carved_count = data.records.iter().filter(|r| r.source == "entry-carved").count();
         assert!(carved_count > 0, "should have carved records in report");
         eprintln!(
             "[e2e] Report source breakdown: {} allocated, {} carved, {} ghost",

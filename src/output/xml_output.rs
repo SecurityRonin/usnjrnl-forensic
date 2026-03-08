@@ -513,4 +513,40 @@ mod tests {
             "Should fail at major_version writeln (line 65)"
         );
     }
+
+    #[test]
+    fn test_xml_writeln_all_fields_via_bufwriter() {
+        // Exercise every writeln! call (lines 22-67) through a BufWriter,
+        // ensuring the write_fmt code path is fully covered by tarpaulin.
+        let resolved = vec![
+            RecordBuilder::new("report.pdf", ".\\case\\report.pdf", ".\\case")
+                .mft(77, 5)
+                .parent(33, 2)
+                .usn_val(54321)
+                .timestamp(1600000000)
+                .reason(UsnReason::DATA_OVERWRITE | UsnReason::CLOSE)
+                .source_info(7)
+                .security_id(15)
+                .build(),
+        ];
+        let mut buf = std::io::BufWriter::new(Vec::new());
+        export_xml(&resolved, &mut buf).unwrap();
+        let output = String::from_utf8(buf.into_inner().unwrap()).unwrap();
+
+        // Verify every XML element that corresponds to the uncovered writeln! lines
+        assert!(output.contains("<sequence_number>5</sequence_number>"));       // line 34
+        assert!(output.contains("<parent_entry_number>33</parent_entry_number>")); // line 39
+        assert!(output.contains("<parent_sequence_number>2</parent_sequence_number>")); // line 44
+        assert!(output.contains("<parent_path>.\\case</parent_path>"));         // line 49
+        assert!(output.contains("<file_attributes>ARCHIVE</file_attributes>")); // line 57
+        assert!(output.contains("<major_version>2</major_version>"));           // line 65
+        // Also verify the surrounding fields for completeness
+        assert!(output.contains("<entry_number>77</entry_number>"));
+        assert!(output.contains("<usn>54321</usn>"));
+        assert!(output.contains("<full_path>.\\case\\report.pdf</full_path>"));
+        assert!(output.contains("<filename>report.pdf</filename>"));
+        assert!(output.contains("<extension>pdf</extension>"));
+        assert!(output.contains("<source_info>7</source_info>"));
+        assert!(output.contains("<security_id>15</security_id>"));
+    }
 }

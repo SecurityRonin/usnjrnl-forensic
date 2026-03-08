@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Triage Precision/Recall Analysis</title>
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
+h1, h2, h3 { color: #1a1a2e; }
+.charts { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+.chart { background: #f8f9fa; border-radius: 8px; padding: 16px; }
+svg { display: block; }
+table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+th, td { border: 1px solid #dee2e6; padding: 8px 12px; text-align: right; }
+th { background: #1a1a2e; color: white; }
+tr:nth-child(even) { background: #f8f9fa; }
+td:first-child, td:nth-child(2) { text-align: left; }
+.good { color: #28a745; font-weight: bold; }
+.warn { color: #ffc107; font-weight: bold; }
+.bad { color: #dc3545; font-weight: bold; }
+</style></head><body>
+<h1>Triage Precision &amp; Recall Analysis</h1>
+<p>Szechuan Sauce CTF &mdash; DESKTOP-SDN1RPT</p>
+<h2>Precision-Recall Scatter (Strict Classification)</h2>
+<div class="charts"><div class="chart">
+<svg width="500" height="500" viewBox="-60 -30 560 560"><line x1="0" y1="500" x2="500" y2="500" stroke="rgb(51,51,51)" stroke-width="2"/>
+<line x1="0" y1="0" x2="0" y2="500" stroke="rgb(51,51,51)" stroke-width="2"/><text x="250" y="540" text-anchor="middle" font-size="14">Recall</text>
+<text x="-30" y="250" text-anchor="middle" font-size="14" transform="rotate(-90,-30,250)">Precision</text><line x1="0" y1="375" x2="500" y2="375" stroke="rgb(238,238,238)" stroke-width="1"/><line x1="125" y1="0" x2="125" y2="500" stroke="rgb(238,238,238)" stroke-width="1"/><text x="-5" y="375" text-anchor="end" font-size="10">25%</text><text x="125" y="515" text-anchor="middle" font-size="10">25%</text><line x1="0" y1="250" x2="500" y2="250" stroke="rgb(238,238,238)" stroke-width="1"/><line x1="250" y1="0" x2="250" y2="500" stroke="rgb(238,238,238)" stroke-width="1"/><text x="-5" y="250" text-anchor="end" font-size="10">50%</text><text x="250" y="515" text-anchor="middle" font-size="10">50%</text><line x1="0" y1="125" x2="500" y2="125" stroke="rgb(238,238,238)" stroke-width="1"/><line x1="375" y1="0" x2="375" y2="500" stroke="rgb(238,238,238)" stroke-width="1"/><text x="-5" y="125" text-anchor="end" font-size="10">75%</text><text x="375" y="515" text-anchor="middle" font-size="10">75%</text><line x1="0" y1="0" x2="500" y2="0" stroke="rgb(238,238,238)" stroke-width="1"/><line x1="500" y1="0" x2="500" y2="500" stroke="rgb(238,238,238)" stroke-width="1"/><text x="-5" y="0" text-anchor="end" font-size="10">100%</text><text x="500" y="515" text-anchor="middle" font-size="10">100%</text><circle cx="47.9" cy="497.7" r="8" fill="rgb(228,26,28)" opacity="0.8"/>
+<text x="59.9" y="501.7" font-size="9" fill="rgb(51,51,51)">initial access</text><circle cx="0.0" cy="500.0" r="8" fill="rgb(55,126,184)" opacity="0.8"/>
+<text x="12.0" y="504.0" font-size="9" fill="rgb(51,51,51)">malware deployed</text><circle cx="500.0" cy="486.8" r="8" fill="rgb(77,175,74)" opacity="0.8"/>
+<text x="512.0" y="490.8" font-size="9" fill="rgb(51,51,51)">execution evidence</text><circle cx="0.0" cy="500.0" r="8" fill="rgb(152,78,163)" opacity="0.8"/>
+<text x="12.0" y="504.0" font-size="9" fill="rgb(51,51,51)">sensitive data</text><circle cx="50.0" cy="0.0" r="8" fill="rgb(255,127,0)" opacity="0.8"/>
+<text x="62.0" y="4.0" font-size="9" fill="rgb(51,51,51)">data staging</text><circle cx="500.0" cy="487.2" r="8" fill="rgb(166,86,40)" opacity="0.8"/>
+<text x="512.0" y="491.2" font-size="9" fill="rgb(51,51,51)">credential access</text><circle cx="0.0" cy="500.0" r="8" fill="rgb(102,194,165)" opacity="0.8"/>
+<text x="12.0" y="504.0" font-size="9" fill="rgb(51,51,51)">evidence destruction</text><circle cx="0.0" cy="500.0" r="8" fill="rgb(252,141,98)" opacity="0.8"/>
+<text x="12.0" y="504.0" font-size="9" fill="rgb(51,51,51)">timestomping</text><circle cx="363.6" cy="495.5" r="8" fill="rgb(141,160,203)" opacity="0.8"/>
+<text x="375.6" y="499.5" font-size="9" fill="rgb(51,51,51)">file disguise</text><circle cx="500.0" cy="0.0" r="8" fill="rgb(231,138,195)" opacity="0.8"/>
+<text x="512.0" y="4.0" font-size="9" fill="rgb(51,51,51)">recovered evidence</text></svg></div></div>
+<h2>Temporal ROC Curves</h2>
+<p>Each curve shows TPR vs FPR as the temporal window around the attack center varies from 1 to 480 minutes.</p>
+<div class="charts"><div class="chart">
+<svg width="500" height="500" viewBox="-60 -30 560 560"><line x1="0" y1="500" x2="500" y2="500" stroke="rgb(51,51,51)" stroke-width="2"/>
+<line x1="0" y1="0" x2="0" y2="500" stroke="rgb(51,51,51)" stroke-width="2"/><text x="250" y="540" text-anchor="middle" font-size="14">FPR</text>
+<text x="-30" y="250" text-anchor="middle" font-size="14" transform="rotate(-90,-30,250)">TPR</text><line x1="0" y1="500" x2="500" y2="0" stroke="rgb(204,204,204)" stroke-width="1" stroke-dasharray="5,5"/><line x1="0" y1="375" x2="500" y2="375" stroke="rgb(238,238,238)"/><line x1="125" y1="0" x2="125" y2="500" stroke="rgb(238,238,238)"/><line x1="0" y1="250" x2="500" y2="250" stroke="rgb(238,238,238)"/><line x1="250" y1="0" x2="250" y2="500" stroke="rgb(238,238,238)"/><line x1="0" y1="125" x2="500" y2="125" stroke="rgb(238,238,238)"/><line x1="375" y1="0" x2="375" y2="500" stroke="rgb(238,238,238)"/><line x1="0" y1="0" x2="500" y2="0" stroke="rgb(238,238,238)"/><line x1="500" y1="0" x2="500" y2="500" stroke="rgb(238,238,238)"/><path d="M17.1,500.0 L17.1,500.0 L17.1,500.0 L17.2,500.0 L18.1,500.0 L7.5,470.7 L5.5,478.0 L0.0,478.4 L0.0,482.9 L0.0,482.9" fill="none" stroke="rgb(228,26,28)" stroke-width="2" opacity="0.7"/><text x="5" y="483" font-size="8" fill="rgb(228,26,28)">initial access</text><path d="M20.9,500.0 L20.9,500.0 L20.9,500.0 L21.0,500.0 L22.1,500.0 L14.2,470.7 L18.1,477.9 L18.0,478.4 L0.0,479.0 L0.0,479.0" fill="none" stroke="rgb(55,126,184)" stroke-width="2" opacity="0.7"/><text x="5" y="479" font-size="8" fill="rgb(55,126,184)">malware deployed</text><path d="M1.3,500.0 L1.3,500.0 L1.3,500.0 L1.3,500.0 L1.4,500.0 L1.7,499.2 L1.8,498.9 L1.6,498.8 L0.0,498.7 L0.0,498.7" fill="none" stroke="rgb(77,175,74)" stroke-width="2" opacity="0.7"/><text x="5" y="499" font-size="8" fill="rgb(77,175,74)">execution evidence</text><path d="M0.3,500.0 L0.3,500.0 L0.3,500.0 L0.3,500.0 L0.3,500.0 L0.0,499.5 L0.0,499.7 L0.0,499.7 L0.0,499.7 L0.0,499.7" fill="none" stroke="rgb(152,78,163)" stroke-width="2" opacity="0.7"/><text x="5" y="500" font-size="8" fill="rgb(152,78,163)">sensitive data</text><path d="M0.0,500.0 L0.0,500.0 L0.0,500.0 L0.0,500.0 L0.0,500.0 L0.0,499.9 L0.0,500.0 L0.0,500.0 L0.0,500.0 L0.0,500.0" fill="none" stroke="rgb(255,127,0)" stroke-width="2" opacity="0.7"/><text x="5" y="500" font-size="8" fill="rgb(255,127,0)">data staging</text><path d="M0.4,500.0 L0.4,473.7 L0.4,482.1 L0.4,481.7 L0.4,498.2 L0.5,499.6 L0.3,499.5 L0.3,499.5 L0.0,499.6 L0.0,499.6" fill="none" stroke="rgb(166,86,40)" stroke-width="2" opacity="0.7"/><text x="5" y="500" font-size="8" fill="rgb(166,86,40)">credential access</text><path d="M0.3,500.0 L0.3,500.0 L0.3,500.0 L0.3,500.0 L0.4,500.0 L0.0,499.2 L0.0,499.5 L0.0,499.6 L0.0,499.7 L0.0,499.7" fill="none" stroke="rgb(247,129,191)" stroke-width="2" opacity="0.7"/><text x="5" y="500" font-size="8" fill="rgb(247,129,191)">persistence</text><path d="M8.9,500.0 L8.9,500.0 L9.0,500.0 L9.0,500.0 L9.1,493.3 L11.2,493.8 L16.3,494.2 L16.3,493.0 L0.0,491.0 L0.0,491.0" fill="none" stroke="rgb(153,153,153)" stroke-width="2" opacity="0.7"/><text x="5" y="491" font-size="8" fill="rgb(153,153,153)">evidence destruction</text><path d="M0.9,500.0 L0.9,500.0 L0.9,500.0 L0.9,500.0 L0.9,500.0 L1.1,499.5 L2.1,499.7 L3.1,499.7 L0.0,499.1 L0.0,499.1" fill="none" stroke="rgb(102,194,165)" stroke-width="2" opacity="0.7"/><text x="5" y="499" font-size="8" fill="rgb(102,194,165)">timestomping</text><path d="M10.2,500.0 L10.2,500.0 L10.2,500.0 L10.3,500.0 L10.9,500.0 L17.5,499.0 L32.6,499.3 L46.8,499.4 L190.3,490.4 L190.3,490.4" fill="none" stroke="rgb(252,141,98)" stroke-width="2" opacity="0.7"/><text x="195" y="490" font-size="8" fill="rgb(252,141,98)">file disguise</text><path d="M2.2,500.0 L2.2,500.0 L2.2,500.0 L2.2,500.0 L2.3,500.0 L3.9,500.0 L7.2,500.0 L8.5,499.5 L500.0,499.6 L500.0,499.6" fill="none" stroke="rgb(141,160,203)" stroke-width="2" opacity="0.7"/><text x="505" y="500" font-size="8" fill="rgb(141,160,203)">recovered evidence</text></svg></div></div>
+<h2>Per-Question Metrics</h2>
+<table>
+<tr><th>#</th><th>Question</th><th>Hits</th><th>Strict P</th><th>Strict R</th><th>Strict F1</th><th>Permissive P</th><th>Permissive R</th><th>Permissive F1</th></tr>
+<tr><td>1</td><td>initial_access</td><td>1491</td><td class="bad">0.5%</td><td>9.6%</td><td>0.9%</td><td class="bad">0.5%</td><td>6.9%</td><td>0.9%</td></tr>
+<tr><td>2</td><td>malware_deployed</td><td>1823</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td></tr>
+<tr><td>3</td><td>execution_evidence</td><td>114</td><td class="bad">2.6%</td><td>100.0%</td><td>5.1%</td><td class="bad">2.6%</td><td>100.0%</td><td>5.1%</td></tr>
+<tr><td>4</td><td>sensitive_data</td><td>22</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td><td class="good">100.0%</td><td>2.9%</td><td>5.7%</td></tr>
+<tr><td>5</td><td>data_staging</td><td>2</td><td class="good">100.0%</td><td>10.0%</td><td>18.2%</td><td class="good">100.0%</td><td>10.0%</td><td>18.2%</td></tr>
+<tr><td>6</td><td>credential_access</td><td>39</td><td class="bad">2.6%</td><td>100.0%</td><td>5.0%</td><td class="good">100.0%</td><td>1.3%</td><td>2.5%</td></tr>
+<tr><td>7</td><td>persistence</td><td>30</td><td class="bad">0.0%</td><td>N/A</td><td>N/A</td><td class="bad">0.0%</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>8</td><td>lateral_movement</td><td>0</td><td class="">N/A</td><td>N/A</td><td>N/A</td><td class="">N/A</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>9</td><td>evidence_destruction</td><td>781</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td></tr>
+<tr><td>10</td><td>timestomping</td><td>76</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td><td class="bad">0.0%</td><td>0.0%</td><td>N/A</td></tr>
+<tr><td>11</td><td>file_disguise</td><td>894</td><td class="bad">0.9%</td><td>72.7%</td><td>1.8%</td><td class="bad">4.3%</td><td>79.2%</td><td>8.1%</td></tr>
+<tr><td>12</td><td>recovered_evidence</td><td>191</td><td class="good">100.0%</td><td>100.0%</td><td>100.0%</td><td class="good">100.0%</td><td>100.0%</td><td>100.0%</td></tr>
+</table>
+</body></html>

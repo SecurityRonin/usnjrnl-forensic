@@ -662,6 +662,292 @@ mod tests {
         assert_eq!(stats.rejected, 0);
     }
 
+    // ─── Coverage tests for uncovered lines ─────────────────────────────
+
+    #[test]
+    fn test_carve_corrupt_attr_chain_short_attr_len() {
+        // Covers line 149: break on attr_len < 8 (corrupt attribute chain)
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        // FILE header
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes()); // sequence
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes()); // in-use
+        buf[24..28].copy_from_slice(&512u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&42u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // Write an attribute with attr_len = 4 (< 8, triggers line 149 break)
+        buf[56..60].copy_from_slice(&0x10u32.to_le_bytes()); // some attr_type != END
+        buf[60..64].copy_from_slice(&4u32.to_le_bytes()); // attr_len = 4 < 8
+
+        let (entries, stats) = carve_mft_entries(&buf);
+        assert_eq!(entries.len(), 0, "Corrupt attr chain should reject entry");
+        assert!(stats.rejected > 0);
+    }
+
+    #[test]
+    fn test_carve_attr_exceeds_entry_boundary() {
+        // Covers line 149 variant: attr_offset + attr_len > MFT_ENTRY_SIZE
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes());
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes());
+        buf[24..28].copy_from_slice(&512u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&42u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // Attribute at offset 56 with length that extends past entry
+        buf[56..60].copy_from_slice(&0x10u32.to_le_bytes()); // attr_type
+        buf[60..64].copy_from_slice(&2000u32.to_le_bytes()); // attr_len > remaining space
+
+        let (entries, stats) = carve_mft_entries(&buf);
+        assert_eq!(entries.len(), 0, "Attr exceeding entry should reject");
+        assert!(stats.rejected > 0);
+    }
+
+    #[test]
+    fn test_carve_non_resident_filename_attr_skipped() {
+        // Covers line 154-155: non_resident != 0 skips the FILE_NAME attribute.
+        // The entry has a FILE_NAME attribute with non_resident flag set,
+        // so it's skipped. No filename is found, entry is rejected.
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes());
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes());
+        buf[24..28].copy_from_slice(&512u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&42u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // FILE_NAME attribute with non_resident = 1
+        let attr_size = 96u32;
+        buf[56..60].copy_from_slice(&ATTR_FILE_NAME.to_le_bytes()); // FILE_NAME type
+        buf[60..64].copy_from_slice(&attr_size.to_le_bytes());
+        buf[64] = 1; // non_resident = 1 (should be skipped)
+
+        // End marker after this attribute
+        let end_off = 56 + attr_size as usize;
+        buf[end_off..end_off + 4].copy_from_slice(&ATTR_END_MARKER.to_le_bytes());
+
+        let (entries, stats) = carve_mft_entries(&buf);
+        assert_eq!(
+            entries.len(),
+            0,
+            "Non-resident FILE_NAME should be skipped"
+        );
+        assert!(stats.rejected > 0);
+    }
+
+    #[test]
+    fn test_carve_filename_attr_content_too_short() {
+        // Covers line 211 in parse_filename_attr: fn_start + 66 > entry.len() || content_size < 66
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes());
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes());
+        buf[24..28].copy_from_slice(&512u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&42u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // FILE_NAME attribute with content_size < 66
+        let attr_size = 48u32; // small attribute
+        buf[56..60].copy_from_slice(&ATTR_FILE_NAME.to_le_bytes());
+        buf[60..64].copy_from_slice(&attr_size.to_le_bytes());
+        buf[64] = 0; // resident
+        // content_size at attr_offset + 16
+        buf[72..76].copy_from_slice(&30u32.to_le_bytes()); // content_size = 30 < 66
+        // content_offset at attr_offset + 20
+        buf[76..78].copy_from_slice(&24u16.to_le_bytes());
+
+        // End marker
+        let end_off = 56 + attr_size as usize;
+        buf[end_off..end_off + 4].copy_from_slice(&ATTR_END_MARKER.to_le_bytes());
+
+        let (entries, stats) = carve_mft_entries(&buf);
+        assert_eq!(
+            entries.len(),
+            0,
+            "FILE_NAME with content < 66 should be rejected"
+        );
+        assert!(stats.rejected > 0);
+    }
+
+    #[test]
+    fn test_carve_filename_attr_zero_name_len() {
+        // Covers line 224 in parse_filename_attr: name_len_chars == 0
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes());
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes());
+        buf[24..28].copy_from_slice(&512u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&42u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // FILE_NAME attribute with content_size >= 66 but name_len_chars = 0
+        let content_offset: u16 = 24;
+        let content_size = 66u32; // exactly minimum
+        let attr_size = ((content_offset as u32 + content_size + 7) & !7) as u32;
+        buf[56..60].copy_from_slice(&ATTR_FILE_NAME.to_le_bytes());
+        buf[60..64].copy_from_slice(&attr_size.to_le_bytes());
+        buf[64] = 0; // resident
+        buf[72..76].copy_from_slice(&content_size.to_le_bytes());
+        buf[76..78].copy_from_slice(&content_offset.to_le_bytes());
+
+        // FILE_NAME content at attr_offset + content_offset = 56 + 24 = 80
+        let fn_start = 56 + content_offset as usize;
+        // Parent reference
+        let parent_ref = 5u64 | (1u64 << 48);
+        buf[fn_start..fn_start + 8].copy_from_slice(&parent_ref.to_le_bytes());
+        // name_len_chars at fn_start + 64
+        buf[fn_start + 64] = 0; // zero-length filename
+        buf[fn_start + 65] = NS_WIN32_AND_DOS;
+
+        // End marker
+        let end_off = 56 + attr_size as usize;
+        if end_off + 4 <= buf.len() {
+            buf[end_off..end_off + 4].copy_from_slice(&ATTR_END_MARKER.to_le_bytes());
+        }
+
+        let (entries, stats) = carve_mft_entries(&buf);
+        assert_eq!(
+            entries.len(),
+            0,
+            "FILE_NAME with zero name length should be rejected"
+        );
+        assert!(stats.rejected > 0);
+    }
+
+    #[test]
+    fn test_carve_filename_attr_name_exceeds_attr() {
+        // Covers line 232 in parse_filename_attr: name_bytes_end > attr boundary
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes());
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes());
+        buf[24..28].copy_from_slice(&512u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&42u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // FILE_NAME attribute where filename extends past attr boundary
+        let content_offset: u16 = 24;
+        let content_size = 70u32; // enough for header but filename will exceed
+        let attr_size = ((content_offset as u32 + content_size + 7) & !7) as u32;
+        buf[56..60].copy_from_slice(&ATTR_FILE_NAME.to_le_bytes());
+        buf[60..64].copy_from_slice(&attr_size.to_le_bytes());
+        buf[64] = 0; // resident
+        buf[72..76].copy_from_slice(&content_size.to_le_bytes());
+        buf[76..78].copy_from_slice(&content_offset.to_le_bytes());
+
+        let fn_start = 56 + content_offset as usize;
+        let parent_ref = 5u64 | (1u64 << 48);
+        buf[fn_start..fn_start + 8].copy_from_slice(&parent_ref.to_le_bytes());
+        // name_len_chars = 100 chars = 200 bytes, way more than attr_size allows
+        buf[fn_start + 64] = 100;
+        buf[fn_start + 65] = NS_WIN32_AND_DOS;
+
+        let end_off = 56 + attr_size as usize;
+        if end_off + 4 <= buf.len() {
+            buf[end_off..end_off + 4].copy_from_slice(&ATTR_END_MARKER.to_le_bytes());
+        }
+
+        let (entries, stats) = carve_mft_entries(&buf);
+        assert_eq!(
+            entries.len(),
+            0,
+            "Filename exceeding attr boundary should be rejected"
+        );
+        assert!(stats.rejected > 0);
+    }
+
+    #[test]
+    fn test_carve_dos_name_not_replaced_by_posix() {
+        // Covers lines 166-168: the dominated logic for namespace preference.
+        // First attr has Win32 name, second has DOS name - Win32 should be kept.
+        let mut buf = vec![0u8; MFT_ENTRY_SIZE];
+
+        buf[0..4].copy_from_slice(&FILE_SIGNATURE);
+        buf[4..6].copy_from_slice(&48u16.to_le_bytes());
+        buf[6..8].copy_from_slice(&3u16.to_le_bytes());
+        buf[8..16].copy_from_slice(&1u64.to_le_bytes());
+        buf[16..18].copy_from_slice(&1u16.to_le_bytes());
+        buf[18..20].copy_from_slice(&1u16.to_le_bytes());
+        let first_attr: u16 = 56;
+        buf[20..22].copy_from_slice(&first_attr.to_le_bytes());
+        buf[22..24].copy_from_slice(&0x01u16.to_le_bytes());
+        buf[24..28].copy_from_slice(&800u32.to_le_bytes());
+        buf[28..32].copy_from_slice(&1024u32.to_le_bytes());
+        buf[44..48].copy_from_slice(&99u32.to_le_bytes());
+        buf[48..50].copy_from_slice(&0x0001u16.to_le_bytes());
+
+        // First FILE_NAME: Win32 (namespace=1) - should be the preferred one
+        let attr1_size = write_filename_attr(
+            &mut buf,
+            first_attr as usize,
+            5,
+            1,
+            "LongFileName.xlsx",
+            NS_WIN32,
+        );
+
+        // Second FILE_NAME: DOS (namespace=2) - should NOT replace Win32
+        let attr2_start = first_attr as usize + attr1_size;
+        write_filename_attr(&mut buf, attr2_start, 5, 1, "LONGFI~1.XLS", NS_DOS);
+
+        let (entries, _) = carve_mft_entries(&buf);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].filename, "LongFileName.xlsx",
+            "Win32 name should be kept over DOS name"
+        );
+    }
+
     // ─── Test: preserves all fields ──────────────────────────────────────────
 
     #[test]

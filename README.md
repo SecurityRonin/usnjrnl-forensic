@@ -1,7 +1,7 @@
 # usnjrnl-forensic
 
 [![Crates.io](https://img.shields.io/crates/v/usnjrnl-forensic.svg)](https://crates.io/crates/usnjrnl-forensic)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-483-green.svg)](https://github.com/SecurityRonin/usnjrnl-forensic)
 [![Sponsor](https://img.shields.io/badge/sponsor-h4x0r-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/h4x0r)
 
@@ -445,6 +445,12 @@ Record-level comparison against MFTECmd, usn.py, dfir_ntfs, usnrs, usnjrnl_rewin
 
 See the full report: **[docs/VALIDATION.md](docs/VALIDATION.md)**
 
+### Triage Accuracy
+
+The `--report` triage was assessed against the [Szechuan Sauce](https://dfirmadness.com/the-stolen-szechuan-sauce/) CTF challenge, cross-referenced with the [official answer key](https://dfirmadness.com/answers-to-szechuan-case-001/) and three independent writeups. On an Apple M4, the tool produces a complete HTML triage report from a 15 GiB E01 image in **4 seconds** — correctly identifying malware delivery (`coreupdater.exe`), deployment to System32, Prefetch execution proof, and data staging (`loot.zip`) that took CTF participants hours to reconstruct manually across 6-10 tools. 11 of 12 triage questions produce forensically useful results with 0 false negatives on evidence present in the USN journal.
+
+See the full report: **[docs/TRIAGE_PERFORMANCE.md](docs/TRIAGE_PERFORMANCE.md)**
+
 ## Testing
 
 483 tests (unit + integration) covering every module. Run with:
@@ -489,4 +495,8 @@ Digital forensics practitioner and tool developer. Building open-source DFIR too
 
 ## License
 
-MIT
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project by you, as defined in the Apache-2.0 license, shall
+be licensed under the same terms, without any additional terms or conditions.

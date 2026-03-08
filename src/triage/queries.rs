@@ -87,7 +87,12 @@ pub fn builtin_questions() -> Vec<TriageQuestion> {
                 reasons: Some(
                     UsnReason::DATA_EXTEND | UsnReason::CLOSE | UsnReason::DATA_TRUNCATION,
                 ),
-                exclude_patterns: vec![r"Windows\\", r"ProgramData\\", r"Program Files"],
+                exclude_patterns: vec![
+                    r"Windows\\",
+                    r"ProgramData\\",
+                    r"Program Files",
+                    r"Packages\\Microsoft\.",
+                ],
                 ..Default::default()
             },
         },
@@ -120,9 +125,9 @@ pub fn builtin_questions() -> Vec<TriageQuestion> {
                 // Hive files are matched by directory path to avoid noisy
                 // bare "sam"/"system" hits. Tool names match anywhere in path.
                 path_patterns: vec![
-                    r"\\config\\SAM",
-                    r"\\config\\SECURITY",
-                    r"\\config\\SYSTEM",
+                    r"\\config\\SAM\b",
+                    r"\\config\\SECURITY\b",
+                    r"\\config\\SYSTEM\b",
                     r"ntds\.dit",
                     r"mimikatz",
                     r"procdump",
@@ -199,6 +204,7 @@ pub fn builtin_questions() -> Vec<TriageQuestion> {
                 extension_filter: vec!["evtx", "pf", "log", "etl"],
                 reasons: Some(UsnReason::FILE_DELETE | UsnReason::DATA_TRUNCATION),
                 path_patterns: vec![r"winevt\\Logs", r"Prefetch", r"\\Logs\\"],
+                exclude_patterns: vec![r"WindowsUpdate"],
                 ..Default::default()
             },
         },
@@ -213,7 +219,12 @@ pub fn builtin_questions() -> Vec<TriageQuestion> {
                 // catches the raw indicators.
                 extension_filter: vec!["exe", "dll", "sys", "bat", "ps1"],
                 reasons: Some(UsnReason::BASIC_INFO_CHANGE),
-                exclude_patterns: vec![r"Windows\\WinSxS", r"Windows\\assembly"],
+                exclude_patterns: vec![
+                    r"Windows\\WinSxS",
+                    r"Windows\\assembly",
+                    r"WindowsApps",
+                    r"Program Files",
+                ],
                 ..Default::default()
             },
         },

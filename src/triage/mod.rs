@@ -987,4 +987,159 @@ mod tests {
         let staging = results.iter().find(|r| r.id == "data_staging").unwrap();
         assert!(!staging.has_hits);
     }
+
+    // ─── Noise reduction tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_credential_access_excludes_config_systemprofile() {
+        // \config\systemprofile\ is NOT the SAM/SECURITY/SYSTEM hive —
+        // it's just the SYSTEM account's user profile folder.
+        let records = vec![
+            make_resolved(
+                r".\Windows\System32\config\systemprofile\AppData\Local\Microsoft\foo.dat",
+                "foo.dat",
+                UsnReason::DATA_TRUNCATION,
+            ),
+            // Real SAM hive access should still match
+            make_resolved(
+                r".\Windows\System32\config\SAM",
+                "SAM",
+                UsnReason::DATA_OVERWRITE,
+            ),
+            make_resolved(
+                r".\Windows\System32\config\SAM.LOG1",
+                "SAM.LOG1",
+                UsnReason::DATA_OVERWRITE,
+            ),
+            make_resolved(
+                r".\Windows\System32\config\SYSTEM",
+                "SYSTEM",
+                UsnReason::DATA_OVERWRITE,
+            ),
+            make_resolved(
+                r".\Windows\System32\config\SECURITY",
+                "SECURITY",
+                UsnReason::DATA_OVERWRITE,
+            ),
+        ];
+
+        let questions = queries::builtin_questions();
+        let results = run_triage(&questions, &records);
+        let cred = results.iter().find(|r| r.id == "credential_access").unwrap();
+
+        // systemprofile record should NOT match
+        assert!(
+            !cred.record_indices.contains(&0),
+            "config\\systemprofile should not trigger credential_access"
+        );
+        // Real hive records SHOULD match
+        assert!(cred.record_indices.contains(&1), "SAM should match");
+        assert!(cred.record_indices.contains(&2), "SAM.LOG1 should match");
+        assert!(cred.record_indices.contains(&3), "SYSTEM should match");
+        assert!(cred.record_indices.contains(&4), "SECURITY should match");
+    }
+
+    #[test]
+    fn test_timestomping_excludes_windowsapps() {
+        // Windows Store app updates generate BASIC_INFO_CHANGE on DLLs
+        // in Program Files\WindowsApps — this is normal, not timestomping.
+        let records = vec![
+            make_resolved(
+                r".\Program Files\WindowsApps\Microsoft.Windows.Photos_2020\BendRealityNode.dll",
+                "BendRealityNode.dll",
+                UsnReason::BASIC_INFO_CHANGE,
+            ),
+            // Real timestomping should still match
+            make_resolved(
+                r".\Users\Admin\Downloads\payload.exe",
+                "payload.exe",
+                UsnReason::BASIC_INFO_CHANGE,
+            ),
+        ];
+
+        let questions = queries::builtin_questions();
+        let results = run_triage(&questions, &records);
+        let ts = results.iter().find(|r| r.id == "timestomping").unwrap();
+
+        assert!(
+            !ts.record_indices.contains(&0),
+            "WindowsApps DLL should not trigger timestomping"
+        );
+        assert!(
+            ts.record_indices.contains(&1),
+            "User Downloads exe should trigger timestomping"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_data_excludes_store_packages() {
+        // Edge/Store temp files in AppData\Local\Packages\Microsoft.*
+        // are not user-sensitive data.
+        let records = vec![
+            make_resolved(
+                r".\Users\Admin\AppData\Local\Packages\Microsoft.MicrosoftEdge_8we\temp.txt",
+                "temp.txt",
+                UsnReason::FILE_CREATE | UsnReason::CLOSE,
+            ),
+            make_resolved(
+                r".\Users\Admin\AppData\Local\Packages\Microsoft.Windows.Search_cw5\cache.txt",
+                "cache.txt",
+                UsnReason::FILE_CREATE | UsnReason::CLOSE,
+            ),
+            // Real sensitive data should still match
+            make_resolved(
+                r".\Users\Admin\Documents\passwords.xlsx",
+                "passwords.xlsx",
+                UsnReason::DATA_EXTEND | UsnReason::CLOSE,
+            ),
+        ];
+
+        let questions = queries::builtin_questions();
+        let results = run_triage(&questions, &records);
+        let sd = results.iter().find(|r| r.id == "sensitive_data").unwrap();
+
+        assert!(
+            !sd.record_indices.contains(&0),
+            "Edge package temp should not trigger sensitive_data"
+        );
+        assert!(
+            !sd.record_indices.contains(&1),
+            "Search package temp should not trigger sensitive_data"
+        );
+        assert!(
+            sd.record_indices.contains(&2),
+            "User Documents xlsx should trigger sensitive_data"
+        );
+    }
+
+    #[test]
+    fn test_evidence_destruction_excludes_windows_update_logs() {
+        // Windows Update log rotation is normal, not evidence destruction.
+        let records = vec![
+            make_resolved(
+                r".\Windows\Logs\WindowsUpdate\WindowsUpdate.20200918.log",
+                "WindowsUpdate.20200918.log",
+                UsnReason::FILE_DELETE | UsnReason::CLOSE,
+            ),
+            // Real evidence destruction: security event log deletion
+            make_resolved(
+                r".\Windows\System32\winevt\Logs\Security.evtx",
+                "Security.evtx",
+                UsnReason::FILE_DELETE,
+            ),
+        ];
+
+        let questions = queries::builtin_questions();
+        let results = run_triage(&questions, &records);
+        let ed = results.iter().find(|r| r.id == "evidence_destruction").unwrap();
+
+        assert!(
+            !ed.record_indices.contains(&0),
+            "Windows Update log rotation should not trigger evidence_destruction"
+        );
+        assert!(
+            ed.record_indices.contains(&1),
+            "Security.evtx deletion should trigger evidence_destruction"
+        );
+    }
 }

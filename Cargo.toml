@@ -3,7 +3,7 @@ name = "usnjrnl-forensic"
 version = "0.6.0"
 edition = "2021"
 description = "NTFS USN Journal parser with full path reconstruction via journal rewind"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/SecurityRonin/usnjrnl-forensic"
 authors = ["Albert Hui"]
 
@@ -20,6 +20,9 @@ mft = "0.6"
 
 # Timestamps
 chrono = { version = "0.4", features = ["serde"] }
+
+# Path display
+shrinkpath = { version = "0.1", default-features = false }
 
 # Data
 serde = { version = "1", features = ["derive"] }

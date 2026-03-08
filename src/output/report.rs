@@ -60,6 +60,7 @@ pub struct ReportRecord {
     pub parent_entry: u64,
     pub parent_sequence: u16,
     pub full_path: String,
+    pub short_path: String,
     pub parent_path: String,
     pub filename: String,
     pub extension: String,
@@ -246,6 +247,7 @@ pub fn build_report_data(input: &ReportInput, triage_questions: &[TriageQuestion
             parent_entry: r.record.parent_mft_entry,
             parent_sequence: r.record.parent_mft_sequence,
             full_path: r.full_path.clone(),
+            short_path: shrinkpath::shrink_to(&r.full_path, 80),
             parent_path: r.parent_path.clone(),
             filename: r.record.filename.clone(),
             extension: extract_extension(&r.record.filename),
@@ -430,6 +432,91 @@ mod tests {
             confidence: 0.0,
         };
         (resolved, vec![], clearing)
+    }
+
+    #[test]
+    fn test_report_record_contains_short_path() {
+        let (resolved, ghosts, clearing) = make_test_input();
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &ghosts,
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        // short_path must exist and be non-empty
+        assert!(!data.records[0].short_path.is_empty());
+        // full_path is preserved unchanged
+        assert_eq!(data.records[0].full_path, ".\\Windows\\System32\\test.exe");
+        // short_path must be <= 80 chars (default target length)
+        assert!(data.records[0].short_path.len() <= 80);
+    }
+
+    #[test]
+    fn test_short_path_shortens_deep_windows_path() {
+        let record = UsnRecord {
+            mft_entry: 100,
+            mft_sequence: 1,
+            parent_mft_entry: 5,
+            parent_mft_sequence: 5,
+            usn: 1000,
+            timestamp: DateTime::from_timestamp(1700000000, 0).unwrap(),
+            reason: UsnReason::FILE_CREATE,
+            filename: "evidence.docx".to_string(),
+            file_attributes: FileAttributes::ARCHIVE,
+            source_info: 0,
+            security_id: 0,
+            major_version: 2,
+        };
+        let resolved = vec![ResolvedRecord {
+            record,
+            full_path: ".\\Users\\Admin\\AppData\\Local\\Microsoft\\Office\\UnsavedFiles\\Recovery\\AutoRecover\\evidence.docx"
+                .to_string(),
+            parent_path: ".\\Users\\Admin\\AppData\\Local\\Microsoft\\Office\\UnsavedFiles\\Recovery\\AutoRecover".to_string(),
+            source: crate::rewind::RecordSource::Allocated,
+        }];
+        let clearing = JournalClearingResult {
+            clearing_detected: false,
+            first_usn: Some(1000),
+            timestamp_gaps: vec![],
+            confidence: 0.0,
+        };
+        let input = ReportInput {
+            image_name: "test.E01",
+            resolved: &resolved,
+            mft_data: None,
+            timestomping: &[],
+            secure_deletion: &[],
+            ransomware: &[],
+            journal_clearing: &clearing,
+            ghost_records: &[],
+            carved_usn_count: 0,
+            carved_mft_count: 0,
+            carving_bytes_scanned: 0,
+            carving_chunks: 0,
+            carving_usn_dupes: 0,
+            carving_mft_dupes: 0,
+        };
+        let questions = crate::triage::queries::builtin_questions();
+        let data = build_report_data(&input, &questions);
+
+        // Deep path should be shortened
+        let rec = &data.records[0];
+        assert!(rec.short_path.len() < rec.full_path.len());
+        // Filename must be preserved
+        assert!(rec.short_path.ends_with("evidence.docx"));
     }
 
     #[test]

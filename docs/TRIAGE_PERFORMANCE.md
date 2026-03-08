@@ -335,7 +335,7 @@ Two outliers:
 
 **Implication for future work:** Since AUC ≈ 0.50 across all content queries, a temporal scoring layer (weighting hits by proximity to detected activity bursts) would be orthogonal to the current approach and could substantially improve precision without sacrificing recall.
 
-The interactive precision-recall scatter plot and temporal ROC curves are available in [`precision_recall.html`](../precision_recall.html).
+The interactive precision-recall scatter plot and temporal ROC curves are available at [precision_recall.html](https://securityronin.github.io/usnjrnl-forensic/precision_recall.html).
 
 ## Conclusion
 

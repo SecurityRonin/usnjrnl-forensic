@@ -243,7 +243,7 @@ pub fn builtin_questions() -> Vec<TriageQuestion> {
             category: "Recovery",
             question: "What did we recover that the attacker deleted?",
             query: TriageQuery {
-                source_filter: vec!["carved", "ghost"],
+                source_filter: vec!["entry-carved", "ghost"],
                 ..Default::default()
             },
         },

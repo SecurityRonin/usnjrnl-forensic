@@ -366,7 +366,7 @@ mod tests {
             category: "Test",
             question: "Only carved records?",
             query: TriageQuery {
-                source_filter: vec!["carved"],
+                source_filter: vec!["entry-carved"],
                 ..Default::default()
             },
         }];
@@ -406,7 +406,7 @@ mod tests {
             category: "Test",
             question: "All recovered?",
             query: TriageQuery {
-                source_filter: vec!["carved", "ghost"],
+                source_filter: vec!["entry-carved", "ghost"],
                 ..Default::default()
             },
         }];
@@ -863,7 +863,7 @@ mod tests {
     fn test_record_source_as_str() {
         use crate::rewind::RecordSource;
         assert_eq!(RecordSource::Allocated.as_str(), "allocated");
-        assert_eq!(RecordSource::Carved.as_str(), "carved");
+        assert_eq!(RecordSource::Carved.as_str(), "entry-carved");
         assert_eq!(RecordSource::Ghost.as_str(), "ghost");
     }
 

@@ -203,7 +203,7 @@ fn e2e_report_with_mixed_sources() {
 
     // Verify source fields in report records
     assert_eq!(data.records[0].source, "allocated");
-    assert_eq!(data.records[2].source, "carved");
+    assert_eq!(data.records[2].source, "entry-carved");
     assert_eq!(data.records[3].source, "ghost");
 
     // Verify triage is embedded in report

@@ -641,7 +641,7 @@ mod tests {
         let data = build_report_data(&input, &questions);
 
         assert_eq!(data.records[0].source, "allocated");
-        assert_eq!(data.records[1].source, "carved");
+        assert_eq!(data.records[1].source, "entry-carved");
         assert_eq!(data.records[2].source, "ghost");
     }
 

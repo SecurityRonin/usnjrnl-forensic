@@ -23,7 +23,7 @@ usnjrnl-forensic --image DESKTOP-SDN1RPT.E01 --carve-unallocated --report triage
 
 [![Triage Report Explore Tab](docs/demo/szechuan-sauce-triage-explore.png)](docs/demo/szechuan-sauce-triage.html)
 
-**The Explore tab is a full timeline workbench.** 55,809 records with search, filters by reason flag, source pill filtering (allocated/carved/ghost), activity sparkline, and paginated results. Every record shows its origin: purple "CARVED" pills for records recovered from unallocated space, red "GHOST" pills for records found in `$LogFile` but wiped from `$UsnJrnl`.
+**The Explore tab is a full timeline workbench.** 55,809 records with search, filters by reason flag, source pill filtering (allocated/entry-carved/ghost), activity sparkline, and paginated results. Every record shows its origin: purple "ENTRY-CARVED" pills for journal entries recovered from unallocated space, red "GHOST" pills for records found in `$LogFile` but wiped from `$UsnJrnl`.
 
 > [View the live report](docs/demo/szechuan-sauce-triage.html) (download the HTML and open it in your browser). Generated from the [Szechuan Sauce DFIR CTF](https://dfirmadness.com/the-stolen-szechuan-sauce/) desktop image ([download the E01](https://dfirmadness.com/the-stolen-szechuan-sauce/), 6.4 GB).
 

@@ -513,6 +513,19 @@ function fmtTimestamp(ts) {
   if (isNaN(d.getTime())) return esc(ts);
   return d.toISOString().replace('T', ' ').replace(/\.000Z$/, 'Z').slice(0, 23);
 }
+function shortenPath(p, maxLen) {
+  if (!p) return '';
+  maxLen = maxLen || 80;
+  if (p.length <= maxLen) return p;
+  var sep = p.indexOf('/') >= 0 ? '/' : '\\';
+  var parts = p.split(sep);
+  if (parts.length <= 4) return p;
+  /* Keep first 3 segments (.\Users\username or .\Windows\System32)
+     and last segment (filename). Always preserve the user context. */
+  var head = parts.slice(0, 3).join(sep);
+  var tail = parts[parts.length - 1];
+  return head + sep + '...' + sep + tail;
+}
 function fmtBytes(b) {
   if (!b) return '0 B';
   var units = ['B','KB','MB','GB','TB'];
@@ -709,7 +722,7 @@ function renderStory() {
           html += '<td>' + esc(fmtTimestamp(rec.timestamp)) + '</td>';
           html += '<td><span class="source-pill ' + esc(rec.source) + '">' + esc(rec.source) + '</span></td>';
           html += '<td>' + esc(rec.filename) + '</td>';
-          html += '<td>' + esc(rec.full_path) + '</td>';
+          html += '<td title="' + esc(rec.full_path) + '">' + esc(shortenPath(rec.full_path)) + '</td>';
           html += '<td>' + (rec.reasons || []).map(function(r) { return '<span class="reason-tag">' + esc(r) + '</span>'; }).join('') + '</td>';
           html += '</tr>';
         });
@@ -1029,7 +1042,7 @@ function renderTable() {
     html += '<td>' + esc(fmtTimestamp(r.timestamp)) + '</td>';
     html += '<td><span class="source-pill ' + esc(r.source) + '">' + esc(r.source) + '</span></td>';
     html += '<td>' + esc(r.filename) + '</td>';
-    html += '<td title="' + esc(r.full_path) + '">' + esc(r.full_path) + '</td>';
+    html += '<td title="' + esc(r.full_path) + '">' + esc(shortenPath(r.full_path)) + '</td>';
     html += '<td>' + (r.reasons || []).map(function(reason) { return '<span class="reason-tag">' + esc(reason) + '</span>'; }).join('') + '</td>';
     html += '<td>' + (r.mft_entry != null ? esc(r.mft_entry) : '—') + '</td>';
     html += '</tr>';

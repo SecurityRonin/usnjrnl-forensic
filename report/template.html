@@ -57,6 +57,38 @@ input[type="text"] { font-family: inherit; }
 .stat-card.red .value { color: #f85149; }
 .stat-card.green .value { color: #3fb950; }
 
+/* ── Caution Banner ──────────────────────────────────────────── */
+.caution-banner {
+  background: rgba(210,153,34,0.08);
+  border: 1px solid rgba(210,153,34,0.4);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #e6edf3;
+}
+.caution-banner .caution-icon {
+  color: #d29922;
+  font-size: 16px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.caution-banner .caution-title {
+  color: #d29922;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.caution-banner .caution-text {
+  color: #7d8590;
+}
+
 /* ── Tab Switcher ─────────────────────────────────────────────── */
 .tab-switcher { display: flex; gap: 4px; margin-bottom: 20px; }
 .tab-btn {
@@ -447,6 +479,15 @@ input[type="text"] { font-family: inherit; }
 
   <!-- Stat Cards -->
   <div class="stat-cards" id="stat-cards"></div>
+
+  <!-- Caution Banner -->
+  <div class="caution-banner">
+    <span class="caution-icon">&#x26A0;</span>
+    <div>
+      <div class="caution-title">Automated Triage — Not a Substitute for Expert Analysis</div>
+      <span class="caution-text">Question answers are pattern-based heuristics and their accuracy is not guaranteed. False positives and false negatives are possible. All findings require manual verification by a qualified DFIR examiner before use in any investigation, legal proceeding, or incident response action.</span>
+    </div>
+  </div>
 
   <!-- Tab Switcher -->
   <div class="tab-switcher">
